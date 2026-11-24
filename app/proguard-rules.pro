@@ -1,0 +1,4 @@
+-keep class org.opencv.** { *; }
+-keepattributes *Annotation*, InnerClasses
+-keepclassmembers class com.smartscan.** { *** Companion; }
+-keepclasseswithmembers class com.smartscan.** { kotlinx.serialization.KSerializer serializer(...); }
