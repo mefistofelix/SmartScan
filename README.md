@@ -119,8 +119,9 @@ Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.10, ML Kit Text Reco
 
 ## Stato e limiti noti
 
-- Prima versione (0.1.0): compila in CI ma non è ancora stata provata su molti dispositivi. Le soglie di rilevamento e scatto automatico ([`AutoCaptureController`](app/src/main/java/com/smartscan/scan/AutoCaptureController.kt)) vanno tarate sul campo.
+- Prima versione (0.1.x): compila in CI ma non è ancora stata provata su molti dispositivi. Le soglie di rilevamento e scatto automatico ([`AutoCaptureController`](app/src/main/java/com/smartscan/scan/AutoCaptureController.kt)) vanno tarate sul campo.
 - Le stringhe dell'interfaccia sono in italiano e scritte direttamente nel codice, non ancora in `strings.xml`.
+- L'APK contiene solo le librerie native `arm64-v8a` (quasi tutti i telefoni recenti). Per dispositivi 32 bit o emulatori x86 va tolto `abiFilters` da `app/build.gradle.kts`.
 - La release è una build di debug. Per una build firmata serve un keystore nei secrets della CI.
 - I comandi vocali continui usano il `SpeechRecognizer` di sistema. Su alcuni dispositivi emette un suono a ogni riavvio dell'ascolto.
 - Il traffico in chiaro (`http://`) è permesso per i server in LAN. L'app mostra un avviso per gli endpoint non https.
