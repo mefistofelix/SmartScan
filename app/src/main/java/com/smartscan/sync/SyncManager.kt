@@ -14,6 +14,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.smartscan.container
 import com.smartscan.data.AppSettings
+import com.smartscan.data.DocOutput
 import com.smartscan.data.DocumentEntity
 import com.smartscan.data.EndpointEntity
 import com.smartscan.data.EndpointType
@@ -103,7 +104,8 @@ class SyncManager(
         if (repo.pages(docId).any { it.ocrText == null }) repo.runOcr(docId, context.container.ocr)
         val dir = File(context.cacheDir, "upload/$docId-$endpointId").apply { deleteRecursively(); mkdirs() }
         try {
-            val files: List<Pair<File, String>> = when (ep.format) {
+            val fmt = effectiveFormat(doc.output, ep.format)
+            val files: List<Pair<File, String>> = when (fmt) {
                 UploadFormat.PDF -> listOf(exporter.exportPdf(docId, false, dir) to "application/pdf")
                 UploadFormat.PDF_OCR -> listOf(exporter.exportPdf(docId, true, dir) to "application/pdf")
                 UploadFormat.IMAGES -> exporter.exportImages(docId, dir).map {
@@ -111,7 +113,7 @@ class SyncManager(
                 }
             }
             val freshDoc = repo.getDoc(docId) ?: doc
-            val meta = metadata(freshDoc, ep, files.map { it.first.name }).toString()
+            val meta = metadata(freshDoc, ep, fmt, files.map { it.first.name }).toString()
             when (ep.type) {
                 EndpointType.HTTP -> httpUpload(ep, meta, files)
                 EndpointType.WEBDAV -> webdavUpload(ep, freshDoc, meta, files)
@@ -155,7 +157,19 @@ class SyncManager(
         }
     }
 
-    private suspend fun metadata(doc: DocumentEntity, ep: EndpointEntity, fileNames: List<String>): JsonObject {
+    /** The document's choice wins; for PDF the endpoint decides whether it carries the OCR text layer. */
+    private fun effectiveFormat(output: DocOutput, endpoint: UploadFormat): UploadFormat = when {
+        output == DocOutput.IMAGES -> UploadFormat.IMAGES
+        endpoint == UploadFormat.PDF -> UploadFormat.PDF
+        else -> UploadFormat.PDF_OCR
+    }
+
+    private suspend fun metadata(
+        doc: DocumentEntity,
+        ep: EndpointEntity,
+        fmt: UploadFormat,
+        fileNames: List<String>,
+    ): JsonObject {
         val all = repo.nodes()
         val byId = all.associateBy { it.id }
         val assigned = repo.docNodeIds(doc.id).mapNotNull { byId[it] }
@@ -175,7 +189,7 @@ class SyncManager(
             put("createdAt", iso(doc.createdAt))
             put("updatedAt", iso(doc.updatedAt))
             put("pages", pages)
-            put("format", ep.format.name.lowercase())
+            put("format", fmt.name.lowercase())
             putJsonArray("categories") { assigned.filter { it.kind == NodeKind.CATEGORY }.forEach { add(node(it)) } }
             putJsonArray("tags") { assigned.filter { it.kind == NodeKind.TAG }.forEach { add(node(it)) } }
             putJsonArray("files") { fileNames.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }

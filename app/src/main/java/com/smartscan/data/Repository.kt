@@ -44,12 +44,12 @@ class Repository(private val context: Context, val db: AppDatabase) {
     suspend fun cleanupEmptyDrafts() = docs.emptyDraftIds().forEach { deleteDoc(it) }
 
     /** Marks the document as complete; OCR + uploads are then enqueued by SyncManager. */
-    suspend fun markProcessing(docId: Long, title: String?, notes: String?) {
+    suspend fun markProcessing(docId: Long, title: String?, notes: String?, output: DocOutput? = null) {
         val d = docs.get(docId) ?: return
         val t = (title ?: d.title).ifBlank {
             "Scansione " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(d.createdAt))
         }
-        updateDoc(d.copy(title = t, notes = notes ?: d.notes, status = DocStatus.PROCESSING))
+        updateDoc(d.copy(title = t, notes = notes ?: d.notes, output = output ?: d.output, status = DocStatus.PROCESSING))
     }
 
     // ---- pages ----

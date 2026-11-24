@@ -74,25 +74,14 @@ fun AppNav() {
         }
         composable("scanner/{docId}", arguments = listOf(navArgument("docId") { type = NavType.LongType })) { e ->
             val docId = e.arguments?.getLong("docId") ?: -1L
-            ScannerScreen(
-                docId = docId,
-                onDone = { id ->
-                    if (docId > 0) nav.popBackStack()
-                    else nav.navigate("review/$id?fromScan=true") { popUpTo("scanner/{docId}") { inclusive = true } }
-                },
-                onCancel = { nav.popBackStack() },
-            )
+            ScannerScreen(docId = docId, onClose = { nav.popBackStack() })
         }
         composable(
-            "review/{docId}?fromScan={fromScan}",
-            arguments = listOf(
-                navArgument("docId") { type = NavType.LongType },
-                navArgument("fromScan") { type = NavType.BoolType; defaultValue = false },
-            )
+            "review/{docId}",
+            arguments = listOf(navArgument("docId") { type = NavType.LongType }),
         ) { e ->
             ReviewScreen(
                 docId = e.arguments?.getLong("docId") ?: -1L,
-                fromScan = e.arguments?.getBoolean("fromScan") ?: false,
                 onAddPages = { id -> nav.navigate("scanner/$id") },
                 onCrop = { pageId -> nav.navigate("crop/$pageId") },
                 onClose = { nav.popBackStack() },

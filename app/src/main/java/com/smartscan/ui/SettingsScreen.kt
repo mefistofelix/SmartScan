@@ -48,7 +48,6 @@ fun SettingsScreen(onClose: () -> Unit) {
         Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())) {
             Section("Scansione")
             Toggle("Scatto automatico", "Scatta quando il documento è fermo e a fuoco", s.autoCapture) { s.autoCapture = it }
-            Toggle("Multipagina di default", "Dopo uno scatto attende la pagina successiva", s.multiPage) { s.multiPage = it }
             Toggle("Raddrizzamento automatico", "Corregge l'inclinazione residua del testo", s.autoDeskew) { s.autoDeskew = it }
             Toggle("Suono otturatore", null, s.shutterSound) { s.shutterSound = it }
             Choice("Filtro predefinito", PageFilter.entries, s.defaultFilter, { it.label }) { s.defaultFilter = it }
@@ -59,8 +58,8 @@ fun SettingsScreen(onClose: () -> Unit) {
 
             Section("Voce")
             Toggle("Comandi vocali durante la scansione", "«scatta», «fine documento», «nuovo documento», «annulla ultima»…", s.voiceCommands) { s.voiceCommands = it }
-            Toggle("Detta metadati prima di iniziare", "All'apertura della fotocamera", s.voiceMetaPre) { s.voiceMetaPre = it }
-            Toggle("Detta metadati a fine documento", "All'apertura della revisione", s.voiceMetaPost) { s.voiceMetaPost = it }
+            Toggle("Detta metadati a inizio documento", "All'apertura della fotocamera e dopo ogni «Fine»", s.voiceMetaPre) { s.voiceMetaPre = it }
+            Toggle("Detta metadati a fine documento", "Dopo «Fine», prima di salvare", s.voiceMetaPost) { s.voiceMetaPost = it }
             Toggle("Crea tag sconosciuti", "I tag dettati che non esistono vengono creati in locale", s.createUnknownTags) { s.createUnknownTags = it }
             Choice("Lingua", listOf("it-IT", "en-US", "de-DE", "fr-FR", "es-ES"), s.voiceLanguage, { it }) { s.voiceLanguage = it }
 

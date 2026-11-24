@@ -34,16 +34,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,7 +58,6 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -93,6 +96,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.smartscan.HardwareKeys
 import com.smartscan.container
+import com.smartscan.data.DocOutput
 import com.smartscan.data.PageEntity
 import com.smartscan.scan.AutoCaptureController
 import com.smartscan.scan.AutoCaptureController.Phase
@@ -102,7 +106,9 @@ import com.smartscan.scan.toUprightGray
 import com.smartscan.voice.VoiceCommand
 import com.smartscan.voice.VoiceCommands
 import com.smartscan.voice.VoiceController
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -121,6 +127,8 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.math.max
 
+enum class Dictation { PRE, POST }
+
 data class ScannerUi(
     val quad: FloatArray? = null,
     val frameW: Int = 3,
@@ -128,38 +136,46 @@ data class ScannerUi(
     val phase: Phase = Phase.SEARCHING,
     val progress: Float = 0f,
     val auto: Boolean = true,
-    val multi: Boolean = true,
     val torch: Boolean = false,
     val capturing: Boolean = false,
     val processing: Int = 0,
     val voiceOn: Boolean = false,
     val voiceAvailable: Boolean = false,
-    val preDictation: Boolean = false,
+    val dictation: Dictation? = null,
     val lastHeard: String = "",
     val metaSummary: String? = null,
     val flashTick: Int = 0,
+    /** Output of the document being scanned, chosen before «Fine». Kept for the next documents. */
+    val output: DocOutput = DocOutput.PDF,
+    val savedCount: Int = 0,
+    val notice: String? = null,
+    val showPages: Boolean = false,
+    val saving: Boolean = false,
 )
 
 sealed interface ScanEvent {
-    data class Done(val docId: Long) : ScanEvent
-    data object Cancelled : ScanEvent
+    data object Closed : ScanEvent
     data class Message(val text: String) : ScanEvent
     data object Shutter : ScanEvent
 }
 
+/**
+ * Continuous scanning: pages go into the current draft; «Fine» saves it (OCR + uploads in background)
+ * and scanning goes on into a new draft right away. When [existingDocId] > 0 the scanner only adds
+ * pages to that document and «Fine» returns to it.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ScannerViewModel(app: Application, private val existingDocId: Long) : AndroidViewModel(app) {
     private val c = app.container
     private val settings = c.settings
     private val docIdFlow = MutableStateFlow<Long?>(null)
-    private val _ui = MutableStateFlow(
-        ScannerUi(auto = settings.autoCapture, multi = settings.multiPage || existingDocId > 0)
-    )
+    private val _ui = MutableStateFlow(ScannerUi(auto = settings.autoCapture))
     val ui: StateFlow<ScannerUi> = _ui.asStateFlow()
     val pages: StateFlow<List<PageEntity>> = docIdFlow.filterNotNull()
         .flatMapLatest { c.repo.observePages(it) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val events = MutableSharedFlow<ScanEvent>(extraBufferCapacity = 8)
+    val addingToExisting = existingDocId > 0
 
     private val controller = AutoCaptureController()
     private val tracker = QuadTracker()
@@ -171,8 +187,10 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     @Volatile private var smoothed: FloatArray? = null
     private val voice = VoiceController(app, settings.voiceLanguage)
     val voicePartial = voice.partial
-    private var preDone = false
-    private var finishing = false
+    private var audioOk = false
+    private var dictationCont: CancellableContinuation<String?>? = null
+    private var noticeJob: Job? = null
+    private var closing = false
 
     init {
         viewModelScope.launch {
@@ -245,7 +263,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         val d = controller.onFrame(s, sharp, sig, SystemClock.elapsedRealtime())
         _ui.update { it.copy(quad = s, frameW = w, frameH = h, phase = d.phase, progress = if (it.auto) d.progress else 0f) }
         if (d.capture) {
-            if (_ui.value.auto && !_ui.value.preDictation) viewModelScope.launch { capture(auto = true) }
+            val u = _ui.value
+            if (u.auto && u.dictation == null && !u.saving) viewModelScope.launch { capture(auto = true) }
             else controller.reset()
         }
     }
@@ -253,7 +272,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     fun capture(auto: Boolean = false) {
         val ic = imageCapture ?: return
         val id = docIdFlow.value ?: return
-        if (_ui.value.capturing || finishing) { if (auto) controller.reset(); return }
+        if (_ui.value.capturing || _ui.value.saving || closing) { if (auto) controller.reset(); return }
         _ui.update { it.copy(capturing = true) }
         val dir = c.repo.docDir(id)
         val raw = File(dir, "raw_${System.nanoTime()}.jpg")
@@ -277,7 +296,6 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                             _ui.update { it.copy(processing = it.processing - 1) }
                         }
                     }
-                    if (!_ui.value.multi) finish()
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -289,42 +307,87 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         )
     }
 
-    fun finish() {
-        if (finishing) return
-        finishing = true
+    // ---------- documents ----------
+
+    fun toggleOutput() {
+        _ui.update { it.copy(output = if (it.output == DocOutput.PDF) DocOutput.IMAGES else DocOutput.PDF) }
+    }
+
+    /** «Fine»: save the current document and keep scanning into a new one. */
+    fun finishDocument() {
+        if (addingToExisting) { close(); return }
+        if (_ui.value.saving || closing) return
+        _ui.update { it.copy(saving = true) }
         viewModelScope.launch {
-            ui.first { it.processing == 0 && !it.capturing }
-            val id = docIdFlow.value ?: run { events.emit(ScanEvent.Cancelled); return@launch }
-            voice.stop()
-            if (c.repo.pageCount(id) == 0) {
-                if (existingDocId <= 0) c.repo.deleteDoc(id)
-                events.emit(ScanEvent.Cancelled)
-            } else {
-                events.emit(ScanEvent.Done(id))
+            try {
+                ui.first { it.processing == 0 && !it.capturing }
+                val id = docIdFlow.value ?: return@launch
+                if (c.repo.pageCount(id) == 0) return@launch
+                if (settings.voiceMetaPost && voiceReady()) {
+                    _ui.update { it.copy(dictation = Dictation.POST) }
+                    val text = dictate()
+                    _ui.update { it.copy(dictation = null) }
+                    if (!text.isNullOrBlank()) c.repo.applyVoiceMetadata(id, text, settings.createUnknownTags)
+                }
+                val n = save(id)
+                docIdFlow.value = c.repo.createDraft()
+                controller.reset()
+                tracker.reset()
+                _ui.update { it.copy(metaSummary = null, showPages = false, savedCount = it.savedCount + 1) }
+                notify("Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}")
+                if (!closing) { if (settings.voiceMetaPre && voiceReady()) preDictation() else resumeCommands() }
+            } finally {
+                _ui.update { it.copy(saving = false) }
             }
         }
     }
 
-    /** Voice "nuovo documento": save the current one and keep scanning into a fresh draft. */
-    private fun newDocument() {
+    /** Leaving the scanner: pending pages are saved, never thrown away. */
+    fun close() {
+        if (closing) return
+        closing = true
+        skipDictation()
+        voice.stop()
         viewModelScope.launch {
-            ui.first { it.processing == 0 && !it.capturing }
-            val id = docIdFlow.value ?: return@launch
-            if (c.repo.pageCount(id) > 0) {
-                c.repo.markProcessing(id, null, null)
-                c.sync.enqueueFinalize(id)
-                docIdFlow.value = c.repo.createDraft()
-                controller.reset()
-                _ui.update { it.copy(metaSummary = null) }
-                events.emit(ScanEvent.Message("Documento salvato · nuovo documento"))
+            ui.first { it.processing == 0 && !it.capturing && !it.saving }
+            val id = docIdFlow.value
+            if (id != null && !addingToExisting) {
+                if (c.repo.pageCount(id) == 0) c.repo.deleteDoc(id)
+                else {
+                    save(id)
+                    events.emit(ScanEvent.Message("Documento salvato"))
+                }
             }
+            events.emit(ScanEvent.Closed)
+        }
+    }
+
+    private suspend fun save(id: Long): Int {
+        val n = c.repo.pageCount(id)
+        c.repo.markProcessing(id, null, null, _ui.value.output)
+        c.sync.enqueueFinalize(id)
+        return n
+    }
+
+    fun togglePages() = _ui.update { it.copy(showPages = !it.showPages && pages.value.isNotEmpty()) }
+
+    fun deletePage(p: PageEntity) {
+        viewModelScope.launch {
+            c.repo.deletePage(p)
+            if (pages.value.size <= 1) _ui.update { it.copy(showPages = false) }
         }
     }
 
     private fun deleteLast() {
         viewModelScope.launch {
-            pages.value.lastOrNull()?.let { c.repo.deletePage(it); events.emit(ScanEvent.Message("Ultima pagina eliminata")) }
+            pages.value.lastOrNull()?.let { c.repo.deletePage(it); notify("Ultima pagina eliminata") }
         }
+    }
+
+    private fun notify(text: String) {
+        noticeJob?.cancel()
+        _ui.update { it.copy(notice = text) }
+        noticeJob = viewModelScope.launch { delay(2500); _ui.update { it.copy(notice = null) } }
     }
 
     fun toggleAuto() {
@@ -332,12 +395,6 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         settings.autoCapture = v
         controller.reset()
         _ui.update { it.copy(auto = v, progress = 0f) }
-    }
-
-    fun toggleMulti() {
-        val v = !_ui.value.multi
-        settings.multiPage = v
-        _ui.update { it.copy(multi = v) }
     }
 
     fun toggleTorch() {
@@ -348,33 +405,47 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     // ---------- voice ----------
 
+    private fun voiceReady() = audioOk && voice.available
+
     fun onPermissions(audioGranted: Boolean) {
-        if (!audioGranted || !voice.available) return
-        if (settings.voiceMetaPre && !preDone) startPreDictation()
-        else if (settings.voiceCommands) startCommands()
+        audioOk = audioGranted
+        if (!voiceReady()) return
+        if (settings.voiceMetaPre && !addingToExisting) preDictation() else resumeCommands()
     }
 
-    private fun startPreDictation() {
-        _ui.update { it.copy(preDictation = true) }
+    private suspend fun dictate(): String? = suspendCancellableCoroutine { cont ->
+        dictationCont = cont
         voice.listenOnce { text ->
-            preDone = true
-            _ui.update { it.copy(preDictation = false) }
-            if (!text.isNullOrBlank()) applyMeta(text)
-            if (settings.voiceCommands) startCommands()
+            dictationCont = null
+            if (cont.isActive) cont.resume(text)
         }
     }
 
-    fun skipPreDictation() {
-        preDone = true
+    private fun preDictation() {
+        viewModelScope.launch {
+            _ui.update { it.copy(dictation = Dictation.PRE) }
+            val text = dictate()
+            _ui.update { it.copy(dictation = null) }
+            if (!text.isNullOrBlank()) applyMeta(text)
+            if (!closing) resumeCommands()
+        }
+    }
+
+    fun skipDictation() {
+        val cont = dictationCont ?: return
+        dictationCont = null
         voice.stop()
-        _ui.update { it.copy(preDictation = false) }
-        if (settings.voiceCommands) startCommands()
+        if (cont.isActive) cont.resume(null)
     }
 
     fun toggleVoice() {
         if (_ui.value.voiceOn) {
             voice.stop(); _ui.update { it.copy(voiceOn = false) }
         } else startCommands()
+    }
+
+    private fun resumeCommands() {
+        if (settings.voiceCommands && voiceReady()) startCommands() else _ui.update { it.copy(voiceOn = false) }
     }
 
     private fun startCommands() {
@@ -386,8 +457,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         _ui.update { it.copy(lastHeard = text) }
         when (val cmd = VoiceCommands.parse(text)) {
             VoiceCommand.Capture -> capture()
-            VoiceCommand.Finish -> finish()
-            VoiceCommand.NewDocument -> newDocument()
+            VoiceCommand.Finish, VoiceCommand.NewDocument -> finishDocument()
             VoiceCommand.DeleteLast -> deleteLast()
             VoiceCommand.ToggleAuto -> toggleAuto()
             VoiceCommand.ToggleFlash -> toggleTorch()
@@ -412,7 +482,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 }
 
 @Composable
-fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
+fun ScannerScreen(docId: Long, onClose: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as Application
     val vm: ScannerViewModel = viewModel(key = "scanner_$docId") { ScannerViewModel(app, docId) }
@@ -441,8 +511,7 @@ fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
     LaunchedEffect(Unit) {
         vm.events.collect { e ->
             when (e) {
-                is ScanEvent.Done -> onDone(e.docId)
-                ScanEvent.Cancelled -> onCancel()
+                ScanEvent.Closed -> onClose()
                 is ScanEvent.Message -> Toast.makeText(context, e.text, Toast.LENGTH_SHORT).show()
                 ScanEvent.Shutter -> {
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -456,7 +525,7 @@ fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
         onDispose { HardwareKeys.shutterEnabled = false; sound.release() }
     }
     LaunchedEffect(Unit) { HardwareKeys.events.collect { vm.capture() } }
-    BackHandler { vm.finish() }
+    BackHandler { if (ui.showPages) vm.togglePages() else vm.close() }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (hasCamera) {
@@ -489,11 +558,10 @@ fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { vm.finish() }) { Icon(Icons.Filled.Close, "Chiudi", tint = Color.White) }
+            IconButton(onClick = { vm.close() }) { Icon(Icons.Filled.Close, "Chiudi", tint = Color.White) }
+            if (ui.savedCount > 0) Pill("✓ ${ui.savedCount} salvati")
             Spacer(Modifier.weight(1f))
             ScanChip("Auto", ui.auto) { vm.toggleAuto() }
-            Spacer(Modifier.width(6.dp))
-            ScanChip(if (ui.multi) "Multipagina" else "Singola", ui.multi) { vm.toggleMulti() }
             IconButton(onClick = { vm.toggleTorch() }) {
                 Icon(if (ui.torch) Icons.Filled.FlashOn else Icons.Filled.FlashOff, "Flash", tint = Color.White)
             }
@@ -511,7 +579,8 @@ fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val hint = when {
-                ui.preDictation -> "Detta i metadati: «titolo … categoria … tag …»"
+                ui.notice != null -> ui.notice!!
+                ui.saving -> "Salvo il documento…"
                 !ui.auto -> "Premi il pulsante o un tasto volume"
                 ui.phase == Phase.WAIT_NEXT -> "Pagina acquisita · metti la prossima"
                 ui.phase == Phase.STEADYING -> "Tieni fermo…"
@@ -524,45 +593,134 @@ fun ScannerScreen(docId: Long, onDone: (Long) -> Unit, onCancel: () -> Unit) {
             ui.metaSummary?.let { Spacer(Modifier.size(6.dp)); Pill(it) }
         }
 
-        if (ui.preDictation) {
+        ui.dictation?.let { kind ->
             Column(
-                Modifier.align(Alignment.Center).clip(RoundedCornerShape(24.dp)).background(Color(0xCC000000)).padding(24.dp),
+                Modifier.align(Alignment.Center).padding(24.dp).clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xCC000000)).padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(48.dp))
-                Text(partial.ifBlank { "In ascolto…" }, color = Color.White, textAlign = TextAlign.Center)
+                Text(
+                    if (kind == Dictation.PRE) "Nuovo documento: detta i metadati" else "Documento finito: detta i metadati",
+                    color = Color.White, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center,
+                )
+                Text(partial.ifBlank { "«titolo … categoria … tag …»" }, color = Color.White, textAlign = TextAlign.Center)
                 Spacer(Modifier.size(12.dp))
-                Button(onClick = { vm.skipPreDictation() }) { Text("Salta") }
+                Button(onClick = { vm.skipDictation() }) { Text("Salta") }
             }
         }
 
-        // Bottom controls (thumb zone)
-        Row(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(Modifier.size(64.dp).clickable(enabled = pages.isNotEmpty()) { vm.finish() }) {
-                pages.lastOrNull()?.let { last ->
-                    BadgedBox(badge = { Badge { Text("${pages.size}") } }) {
-                        AsyncImage(
-                            model = File(last.processedPath), contentDescription = "Ultima pagina",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                        )
+        // Bottom: page strip (optional) + controls in the thumb zone
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
+            if (ui.showPages && pages.isNotEmpty()) PageStrip(pages) { vm.deletePage(it) }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Left: current document pages
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    PagesButton(pages, ui.processing) { vm.togglePages() }
+                }
+                ShutterButton(progress = ui.progress, busy = ui.capturing || ui.saving) { vm.capture() }
+                // Right: output format + Fine
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (!vm.addingToExisting) {
+                            OutputToggle(ui.output) { vm.toggleOutput() }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        Button(
+                            onClick = { vm.finishDocument() },
+                            enabled = (pages.isNotEmpty() || ui.processing > 0) && !ui.saving,
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        ) {
+                            Icon(Icons.Filled.Check, null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Fine")
+                        }
                     }
                 }
-            }
-            ShutterButton(progress = ui.progress, busy = ui.capturing) { vm.capture() }
-            Button(onClick = { vm.finish() }, enabled = pages.isNotEmpty() || ui.processing > 0) {
-                Icon(Icons.Filled.Check, null)
-                Spacer(Modifier.width(4.dp))
-                Text("Fine")
             }
         }
     }
 }
+
+/** Last page thumbnail with the page count; tap to show all pages of the current document. */
+@Composable
+private fun PagesButton(pages: List<PageEntity>, processing: Int, onClick: () -> Unit) {
+    val last = pages.lastOrNull()
+    Box(Modifier.size(width = 60.dp, height = 76.dp).clickable(enabled = last != null, onClick = onClick)) {
+        if (last != null) {
+            if (pages.size > 1) Box(
+                Modifier.size(width = 50.dp, height = 66.dp).align(Alignment.BottomEnd)
+                    .clip(RoundedCornerShape(6.dp)).background(Color(0x88FFFFFF))
+            )
+            AsyncImage(
+                model = File(last.processedPath), contentDescription = "Pagine del documento",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(width = 50.dp, height = 66.dp).align(Alignment.TopStart)
+                    .clip(RoundedCornerShape(6.dp)).border(2.dp, Color.White, RoundedCornerShape(6.dp))
+            )
+            Badge(Modifier.align(Alignment.TopEnd)) { Text("${pages.size}") }
+        } else if (processing > 0) {
+            Box(
+                Modifier.size(width = 50.dp, height = 66.dp).clip(RoundedCornerShape(6.dp))
+                    .border(2.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun PageStrip(pages: List<PageEntity>, onDelete: (PageEntity) -> Unit) {
+    LazyRow(
+        Modifier.fillMaxWidth().background(Color(0x99000000)).padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+    ) {
+        itemsIndexed(pages, key = { _, p -> p.id }) { i, p ->
+            Box(Modifier.size(width = 66.dp, height = 88.dp)) {
+                AsyncImage(
+                    model = File(p.processedPath), contentDescription = "Pagina ${i + 1}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
+                )
+                Text(
+                    "${i + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+                        .clip(RoundedCornerShape(4.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp)
+                )
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(2.dp).size(24.dp).clip(CircleShape)
+                        .background(Color(0xCC000000)).clickable { onDelete(p) },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Close, "Elimina pagina", tint = Color.White, modifier = Modifier.size(16.dp)) }
+            }
+        }
+    }
+}
+
+/** One tap switches the output of the current document: PDF <-> images. */
+@Composable
+private fun OutputToggle(output: DocOutput, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(Color(0x99000000)).clickable(onClick = onClick)
+            .padding(3.dp),
+    ) {
+        for (o in DocOutput.entries) {
+            val sel = o == output
+            Text(
+                if (o == DocOutput.PDF) "PDF" else "IMG",
+                color = if (sel) MaterialTheme.colorScheme.onPrimary else Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.clip(RoundedCornerShape(50))
+                    .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
 
 @Composable
 private fun ScanChip(label: String, selected: Boolean, onClick: () -> Unit) {

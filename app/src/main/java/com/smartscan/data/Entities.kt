@@ -20,6 +20,9 @@ enum class UploadFormat(val label: String) { PDF("PDF"), PDF_OCR("PDF ricercabil
 
 enum class UploadStatus { QUEUED, RUNNING, DONE, FAILED }
 
+/** What a document becomes when it is saved and sent: chosen in the scanner before «Fine». */
+enum class DocOutput(val label: String) { PDF("PDF"), IMAGES("Immagini") }
+
 @Entity(tableName = "documents")
 data class DocumentEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -30,6 +33,7 @@ data class DocumentEntity(
     val updatedAt: Long = System.currentTimeMillis(),
     val status: DocStatus = DocStatus.DRAFT,
     val ocrText: String = "",
+    val output: DocOutput = DocOutput.PDF,
 )
 
 @Entity(

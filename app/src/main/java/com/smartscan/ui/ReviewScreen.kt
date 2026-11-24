@@ -168,7 +168,6 @@ class ReviewViewModel(app: Application, val docId: Long) : AndroidViewModel(app)
 @Composable
 fun ReviewScreen(
     docId: Long,
-    fromScan: Boolean,
     onAddPages: (Long) -> Unit,
     onCrop: (Long) -> Unit,
     onClose: () -> Unit,
@@ -197,9 +196,6 @@ fun ReviewScreen(
     fun dictate() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.dictate()
         else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-    }
-    LaunchedEffect(fromScan) {
-        if (fromScan && vm.settings.voiceMetaPost && vm.voiceAvailable) dictate()
     }
     BackHandler { if (isDraft) confirmDiscard = true else onClose() }
 

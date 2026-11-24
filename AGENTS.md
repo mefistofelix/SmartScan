@@ -49,6 +49,10 @@ app/src/main/java/com/smartscan/
   and read-only, and is merged by `(kind, remoteId)` in `SyncManager.merge`. Do not delete and
   re-insert remote nodes: that cascades away document assignments.
 - Document lifecycle: `DRAFT` (scanning/review) -> `PROCESSING` (saved; OCR queued) -> `READY`.
+- Scanner flow is continuous: no single/multi mode. «Fine» (`ScannerViewModel.finishDocument`) saves the draft
+  and scanning goes on into a new draft. Closing the scanner saves pending pages. `DocumentEntity.output`
+  (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
+- Room schema changes need a `Migration` in `AppDatabase` (current version 2). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).
 - The endpoint protocol (QR JSON, multipart fields, metadata schema `smartscan/1`, taxonomy JSON) is
   documented in README.md. If you change it, update README in the same change and keep it backward

@@ -31,8 +31,6 @@ class AppSettings(context: Context) {
 
     var autoCapture: Boolean
         get() = bool("autoCapture", true); set(v) = setBool("autoCapture", v)
-    var multiPage: Boolean
-        get() = bool("multiPage", true); set(v) = setBool("multiPage", v)
     var autoDeskew: Boolean
         get() = bool("autoDeskew", true); set(v) = setBool("autoDeskew", v)
     var voiceCommands: Boolean

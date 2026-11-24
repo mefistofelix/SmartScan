@@ -10,7 +10,8 @@ L'APK si scarica dalla pagina **Releases** (build di debug firmata con la chiave
 
 | Area | Cosa fa |
 |---|---|
-| **Acquisizione** | CameraX a pieno schermo, rilevamento bordi in tempo reale (OpenCV), **scatto automatico** quando il foglio è fermo e a fuoco, **attesa automatica della pagina successiva** (rileva il cambio di scena), modalità singola o multipagina, flash, tap-to-focus, **tasti volume come otturatore**. |
+| **Acquisizione** | CameraX a pieno schermo, rilevamento bordi in tempo reale (OpenCV), **scatto automatico** quando il foglio è fermo e a fuoco, **attesa automatica della pagina successiva** (rileva il cambio di scena), flash, tap-to-focus, **tasti volume come otturatore**. |
+| **Flusso continuo** | Nessuna modalità da scegliere: scatti le pagine, in basso a sinistra vedi l'anteprima con il numero di pagine (tocco = elenco con eliminazione), in basso a destra scegli **PDF / IMG** (predefinito PDF) e premi **Fine**. Il documento va in archivio, OCR e upload partono in background e la fotocamera resta pronta per il documento successivo. Chiudendo la fotocamera le pagine in sospeso vengono salvate. |
 | **Elaborazione** | Correzione prospettica, **raddrizzamento automatico** (deskew sulle righe di testo), editor manuale dei 4 angoli con lente d'ingrandimento, **espansione / restringimento dei bordi**, «pagina intera», rotazione, riordino ed eliminazione pagine. |
 | **Filtri** | Originale, Migliorato (rimozione ombre e normalizzazione dell'illuminazione), Grigi, Bianco/nero (soglia adattiva, salvato a 1 bit). |
 | **OCR** | ML Kit on-device (offline), in background con WorkManager. Testo ricercabile nell'archivio. |
@@ -18,7 +19,7 @@ L'APK si scarica dalla pagina **Releases** (build di debug firmata con la chiave
 | **Archivio** | Locale (Room + file privati dell'app), ricerca su titolo, note, testo OCR e tag; filtro per ramo dell'albero delle categorie. |
 | **Categorie e tag** | Due alberi di profondità arbitraria (categorie, tag/etichette), assegnazione multipla per documento. Alberi locali modificabili e **alberi remoti** scaricati dagli endpoint (sola lettura, unione con id stabili). |
 | **Endpoint di storage** | Aggiunta da **QR code** (o link `smartscan://add?cfg=…`) con conferma esplicita dell'host. HTTP multipart o WebDAV. **Upload in background** con nuovi tentativi, vincolo «solo Wi-Fi», invio automatico o manuale. |
-| **Voce** | Comandi durante la scansione: «scatta», «pagina successiva», «fine documento», «nuovo documento», «annulla ultima», «automatico», «flash». Dettatura dei metadati **prima** (all'apertura della fotocamera), **durante** o **dopo** (in revisione). |
+| **Voce** | Comandi durante la scansione: «scatta», «pagina successiva», «fine documento», «nuovo documento», «annulla ultima», «automatico», «flash». Dettatura dei metadati **prima** (a inizio documento), **durante** o **dopo** (a «Fine», prima del salvataggio). |
 
 ### Metadati a voce
 
@@ -48,7 +49,7 @@ Il QR contiene questo JSON (oppure `smartscan://add?cfg=<JSON in base64url>`):
 ```
 
 - `type`: `http` (POST multipart) oppure `webdav` (PUT nella cartella `url`).
-- `format`: `pdf`, `pdf_ocr`, `images`.
+- `format`: `pdf`, `pdf_ocr`, `images`. Vale come predefinito dell'endpoint: la scelta PDF/IMG fatta in fotocamera per ogni documento ha la precedenza. Per i documenti PDF, `pdf` invia il PDF senza testo e gli altri valori il PDF ricercabile.
 - `headers`: inviati con ogni richiesta (upload e tassonomia).
 
 Il QR contiene un token: trattalo come una password.

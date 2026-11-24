@@ -25,6 +25,18 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      # A fixed debug key, so every CI build installs over the previous one.
+      # Without the secret, AGP creates a random key per run and updates fail with
+      # INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+      - name: Use shared debug signing key
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            mkdir -p ~/.android
+            echo "$DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+          fi
+
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace --no-daemon
 
