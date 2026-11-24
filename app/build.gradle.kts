@@ -14,8 +14,8 @@ android {
         applicationId = "com.smartscan"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.2.1"
         // arm64 only for now (covers virtually all current phones, e.g. Galaxy A16).
         // OpenCV ships native libs for 4 ABIs; dropping the others cuts the APK size by about 70%.
         ndk { abiFilters += "arm64-v8a" }
@@ -61,7 +61,7 @@ dependencies {
     implementation("androidx.camera:camera-view:$camerax")
 
     // Computer vision / OCR / QR
-    implementation("org.opencv:opencv:4.10.0")
+    implementation("org.opencv:opencv:4.14.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")

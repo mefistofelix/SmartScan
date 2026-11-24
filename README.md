@@ -116,7 +116,7 @@ La CI ([.github/workflows/android.yml](.github/workflows/android.yml)) compila a
 
 ## Stack
 
-Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.10, ML Kit Text Recognition e Barcode Scanning, Room, WorkManager, OkHttp, kotlinx.serialization, Coil. minSdk 26, targetSdk 35.
+Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.14, ML Kit Text Recognition e Barcode Scanning, Room, WorkManager, OkHttp, kotlinx.serialization, Coil. minSdk 26, targetSdk 35.
 
 ## Stato e limiti noti
 
