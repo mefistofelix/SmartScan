@@ -96,8 +96,8 @@ import com.smartscan.container
 import com.smartscan.data.PageEntity
 import com.smartscan.scan.AutoCaptureController
 import com.smartscan.scan.AutoCaptureController.Phase
-import com.smartscan.scan.Corners
 import com.smartscan.scan.DocumentDetector
+import com.smartscan.scan.QuadTracker
 import com.smartscan.scan.toUprightGray
 import com.smartscan.voice.VoiceCommand
 import com.smartscan.voice.VoiceCommands
@@ -162,6 +162,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     val events = MutableSharedFlow<ScanEvent>(extraBufferCapacity = 8)
 
     private val controller = AutoCaptureController()
+    private val tracker = QuadTracker()
     private val executor = Executors.newSingleThreadExecutor()
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
@@ -239,10 +240,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private fun onAnalysis(q: FloatArray?, sharp: Double, sig: ByteArray, w: Int, h: Int) {
         lastSig = sig
-        val prev = smoothed
-        val s = if (q == null) null else if (prev == null || Corners.maxDelta(prev, q) > 0.08f) q else Corners.lerp(prev, q, 0.5f)
+        val s = tracker.update(q)
         smoothed = s
-        val d = controller.onFrame(q, sharp, sig, SystemClock.elapsedRealtime())
+        val d = controller.onFrame(s, sharp, sig, SystemClock.elapsedRealtime())
         _ui.update { it.copy(quad = s, frameW = w, frameH = h, phase = d.phase, progress = if (it.auto) d.progress else 0f) }
         if (d.capture) {
             if (_ui.value.auto && !_ui.value.preDictation) viewModelScope.launch { capture(auto = true) }
