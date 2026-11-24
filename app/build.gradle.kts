@@ -14,11 +14,24 @@ android {
         applicationId = "com.smartscan"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 5
+        versionName = "0.2.2"
         // arm64 only for now (covers virtually all current phones, e.g. Galaxy A16).
         // OpenCV ships native libs for 4 ABIs; dropping the others cuts the APK size by about 70%.
         ndk { abiFilters += "arm64-v8a" }
+    }
+
+    // Fixed debug key in CI (see .github/workflows/android.yml), so updates install over older builds.
+    signingConfigs {
+        getByName("debug") {
+            System.getenv("SMARTSCAN_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }?.let {
+                storeFile = file(it)
+                storeType = "pkcs12"
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {
