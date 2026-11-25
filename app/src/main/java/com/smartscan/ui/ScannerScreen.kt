@@ -206,7 +206,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private val docIdFlow = MutableStateFlow<Long?>(null)
     private val _ui = MutableStateFlow(
         ScannerUi(
-            auto = settings.autoCapture, hq = settings.maxQuality,
+            auto = settings.autoCapture, hq = settings.maxQuality, torch = settings.torchOn,
             edges = settings.edgeDetect, deskew = settings.edgeDetect && settings.autoDeskew,
             geo = settings.geoTag,
             fullPreview = settings.fullPreview,
@@ -321,11 +321,20 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         cam.cameraInfo.cameraState.removeObservers(owner)
         cam.cameraInfo.torchState.removeObservers(owner)
         cam.cameraInfo.cameraState.observe(owner) { st ->
-            if (st.type == CameraState.Type.OPEN && _ui.value.torch) applyTorch()
+            // Back from background: the camera reopens with the torch off. Re-apply it once the session runs
+            // (a request sent too early is dropped), with a fresh retry budget.
+            if (st.type == CameraState.Type.OPEN && _ui.value.torch) {
+                torchRetries = 0
+                applyTorch()
+                main.postDelayed({ if (_ui.value.torch) applyTorch() }, 500)
+                main.postDelayed({ if (_ui.value.torch) applyTorch() }, 1500)
+            }
         }
         cam.cameraInfo.torchState.observe(owner) { st ->
             if (st == TorchState.ON) torchRetries = 0
-            else if (_ui.value.torch && !closing && torchRetries < 3) {
+            else if (_ui.value.torch && !closing && torchRetries < 3 &&
+                owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            ) {
                 torchRetries++
                 main.postDelayed({ if (_ui.value.torch) applyTorch() }, 300)
             }
@@ -523,6 +532,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     fun toggleTorch() {
         _ui.update { it.copy(torch = !it.torch) }
+        settings.torchOn = _ui.value.torch
         torchRetries = 0
         applyTorch()
         if (_ui.value.torch) {

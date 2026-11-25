@@ -45,6 +45,9 @@ class AppSettings(context: Context) {
     /** Scanner preview: full screen (true) or the whole 4:3 frame, centered (false). */
     var fullPreview: Boolean
         get() = bool("fullPreview", true); set(v) = setBool("fullPreview", v)
+    /** Scanner light left on: restored when the scanner opens again or the app returns to the foreground. */
+    var torchOn: Boolean
+        get() = bool("torchOn", false); set(v) = setBool("torchOn", v)
     /** Scanner: documents finished with «Fine» go to the auto-upload endpoints (false = keep local). */
     var uploadOnFinish: Boolean
         get() = bool("uploadOnFinish", true); set(v) = setBool("uploadOnFinish", v)
