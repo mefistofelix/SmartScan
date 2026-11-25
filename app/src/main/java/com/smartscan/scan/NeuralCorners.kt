@@ -44,23 +44,32 @@ object NeuralCorners {
         try {
             val bytes = context.assets.open("docaligner_lcnet100.onnx").use { it.readBytes() }
             val e = OrtEnvironment.getEnvironment()
-            fun options(xnnpack: Boolean) = OrtSession.SessionOptions().apply {
+            fun options(xnnpack: Boolean, threads: Int) = OrtSession.SessionOptions().apply {
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 if (xnnpack) {
-                    // XNNPACK: ARM-optimized kernels, usually 2-3x faster than the default CPU ones on phones.
-                    // ORT recommends one ORT thread when XNNPACK has its own pool.
+                    // XNNPACK: ARM-optimized kernels; ORT recommends one ORT thread when XNNPACK has its own pool.
                     setIntraOpNumThreads(1)
-                    addXnnpack(mapOf("intra_op_num_threads" to "4"))
+                    addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
                 } else {
-                    setIntraOpNumThreads(4)
+                    setIntraOpNumThreads(threads)
                 }
             }
-            val s = try {
-                e.createSession(bytes, options(xnnpack = true))
-            } catch (t: Throwable) {
-                Log.w(TAG, "XNNPACK not available, plain CPU", t)
-                e.createSession(bytes, options(xnnpack = false))
+            // Phones differ a lot (big.LITTLE cores, XNNPACK support): measure a few setups and keep the fastest.
+            val dummy = FloatArray(3 * SIDE * SIDE) { 0.5f }
+            var best: OrtSession? = null
+            var bestMs = Long.MAX_VALUE
+            var bestName = ""
+            for ((xnn, threads) in listOf(false to 2, false to 4, true to 2, true to 4)) {
+                val s = try { e.createSession(bytes, options(xnn, threads)) } catch (t: Throwable) {
+                    Log.w(TAG, "setup xnnpack=$xnn threads=$threads not available", t); continue
+                }
+                val ms = try { bench(e, s, dummy) } catch (t: Throwable) { Long.MAX_VALUE }
+                Log.i(TAG, "setup xnnpack=$xnn threads=$threads: $ms ms")
+                if (ms < bestMs) { best?.close(); best = s; bestMs = ms; bestName = "xnnpack=$xnn threads=$threads" }
+                else s.close()
             }
+            val s = best ?: e.createSession(bytes, options(false, 2))
+            Log.i(TAG, "using $bestName ($bestMs ms)")
             inputName = s.inputNames.firstOrNull() ?: inputName
             outputName = s.outputNames.firstOrNull { it == "heatmap" } ?: s.outputNames.first()
             env = e
@@ -69,6 +78,20 @@ object NeuralCorners {
         } catch (t: Throwable) {
             Log.e(TAG, "model not available, falling back to OpenCV", t)
         }
+    }
+
+    /** Median time of a few runs after a warm-up. */
+    private fun bench(e: OrtEnvironment, s: OrtSession, input: FloatArray): Long {
+        val name = s.inputNames.first()
+        val times = ArrayList<Long>()
+        repeat(6) { i ->
+            OnnxTensor.createTensor(e, FloatBuffer.wrap(input), longArrayOf(1, 3, SIDE.toLong(), SIDE.toLong())).use { t ->
+                val t0 = SystemClock.elapsedRealtime()
+                s.run(mapOf(name to t)).close()
+                if (i >= 2) times += SystemClock.elapsedRealtime() - t0
+            }
+        }
+        return times.sorted()[times.size / 2]
     }
 
     /**
