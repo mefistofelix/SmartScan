@@ -5,10 +5,14 @@ package com.smartscan.scan
  *
  * SEARCHING -> (quad found) STEADYING -> (quad still + sharp for [stableMs]) CAPTURING
  * -> WAIT_NEXT -> (scene changed or page removed) SEARCHING ...
+ *
+ * Stillness is measured against an anchor (the quad when the hold started), not frame to frame,
+ * so a slow drift or a framing still being adjusted restarts the countdown. The hold is long
+ * enough for a person to stop moving and check the framing before the shot.
  */
 class AutoCaptureController(
-    private val stableMs: Long = 900,
-    private val moveTolerance: Float = 0.02f,
+    private val stableMs: Long = 1600,
+    private val moveTolerance: Float = 0.025f,
     private val minSharpness: Double = 25.0,
     private val minArea: Float = 0.15f,
 ) {
@@ -19,7 +23,7 @@ class AutoCaptureController(
     @Volatile var phase = Phase.SEARCHING
         private set
 
-    private var lastQuad: FloatArray? = null
+    private var anchor: FloatArray? = null
     private var stableSince = 0L
     private var capturedSig: ByteArray? = null
     private var waitSince = 0L
@@ -37,19 +41,19 @@ class AutoCaptureController(
                 val lostLong = lostSince != 0L && now - lostSince > 400
                 if (now - waitSince > 1200 && (changed || lostLong)) {
                     phase = Phase.SEARCHING
-                    lastQuad = null
+                    anchor = null
                 }
                 return Decision(phase, 0f, false)
             }
             else -> {
                 if (quad == null || Corners.area(quad) < minArea) {
                     phase = Phase.SEARCHING
-                    lastQuad = null
+                    anchor = null
                     return Decision(phase, 0f, false)
                 }
-                val prev = lastQuad
-                lastQuad = quad
-                if (prev == null || Corners.maxDelta(prev, quad) > moveTolerance || sharpness < minSharpness) {
+                val a = anchor
+                if (a == null || Corners.maxDelta(a, quad) > moveTolerance || sharpness < minSharpness) {
+                    anchor = quad
                     phase = Phase.STEADYING
                     stableSince = now
                     return Decision(phase, 0f, false)
@@ -76,7 +80,7 @@ class AutoCaptureController(
     @Synchronized
     fun reset() {
         phase = Phase.SEARCHING
-        lastQuad = null
+        anchor = null
         capturedSig = null
     }
 }
