@@ -117,8 +117,9 @@ import com.smartscan.scan.AutoCaptureController.Phase
 import com.smartscan.scan.DocumentDetector
 import com.smartscan.scan.LocationTracker
 import com.smartscan.scan.QuadTracker
-import com.smartscan.scan.toUprightChroma
-import com.smartscan.scan.toUprightGray
+import com.smartscan.scan.toUprightRgba
+import org.opencv.core.Mat
+import org.opencv.imgproc.Imgproc
 import com.smartscan.voice.VoiceCommand
 import com.smartscan.voice.VoiceCommands
 import com.smartscan.voice.VoiceController
@@ -227,7 +228,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
     private var grayBuf: ByteArray? = null
-    private var chromaBuf: ByteArray? = null
+    private var rgbaBuf: ByteArray? = null
     @Volatile private var lastSig = ByteArray(0)
     @Volatile private var smoothed: FloatArray? = null
     private val voice = VoiceController(app, settings.voiceLanguage)
@@ -288,23 +289,26 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                     ).build()
             )
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
         analysis.setAnalyzer(executor) { proxy ->
             try {
-                val gray = proxy.toUprightGray(grayBuf)
-                val q = if (_ui.value.edges) {
-                    val n = (proxy.width / 2) * (proxy.height / 2)
-                    val buf = chromaBuf?.takeIf { it.size == n } ?: ByteArray(n).also { chromaBuf = it }
-                    val chroma = proxy.toUprightChroma(buf)
-                    try { DocumentDetector.detect(gray, chroma) } finally { chroma.release() }
+                // RGBA frame (converted by CameraX): color for the neural corner model, gray for sharpness.
+                val n = proxy.width * proxy.height * 4
+                val buf = rgbaBuf?.takeIf { it.size == n } ?: ByteArray(n).also { rgbaBuf = it }
+                val rgba = proxy.toUprightRgba(buf)
+                val gray = Mat()
+                Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+                val norm = if (_ui.value.edges) {
+                    val bgr = Mat()
+                    Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
+                    try { DocumentDetector.detectNormalized(bgr, gray) } finally { bgr.release() }
                 } else null
+                rgba.release()
                 val sharp = DocumentDetector.sharpness(gray)
                 val sig = DocumentDetector.signature(gray)
                 val w = gray.cols(); val h = gray.rows()
                 gray.release()
-                val norm = q?.let { pts ->
-                    FloatArray(8) { i -> if (i % 2 == 0) (pts[i / 2].x / w).toFloat() else (pts[i / 2].y / h).toFloat() }
-                }
                 onAnalysis(norm, sharp, sig, w, h)
             } catch (t: Throwable) {
                 Log.w("Scanner", "analysis", t)

@@ -25,7 +25,8 @@ app/src/main/java/com/smartscan/
   MainActivity.kt      Nav graph (routes: archive, scanner/{docId}, review/{docId}, crop/{pageId},
                        doc/{docId}, endpoints, qr, taxonomy, settings), volume-key shutter
   data/                Room entities/DAOs/DB, Repository, AppSettings (SharedPreferences)
-  scan/                OpenCV: DocumentDetector (edges, sharpness, scene signature),
+  scan/                NeuralCorners (DocAligner ONNX model in assets, the main detector),
+                         scan/                OpenCV: DocumentDetector (edges, sharpness, scene signature),
                        ImageProcessor (EXIF normalize, warp, deskew, filters), AutoCaptureController
   ocr/                 ML Kit OCR -> text + normalized line boxes
   export/              PdfWriter (hand-written PDF 1.4, invisible OCR layer), Exporter
@@ -43,6 +44,9 @@ app/src/main/java/com/smartscan/
   deletes the old file and resets OCR (`ocrText = null` means "OCR pending").
 - All page rendering goes through `Repository` and its `renderMutex`, to keep memory bounded and page
   positions consistent. Do not call `ImageProcessor.renderPage` from UI code.
+- Corner detection: `DocumentDetector.detectNormalized` uses `NeuralCorners` (ONNX Runtime, model
+  `assets/docaligner_lcnet100.onnx`, input 1x3x256x256 BGR 0..1, output "heatmap" 4 corner channels) and falls
+  back to the OpenCV pipeline only while the model is not loaded. Results always go through the shape check.
 - OpenCV `Mat`s must be `release()`d. The camera analyzer runs about 10 fps and leaks quickly.
 - OpenCV is loaded with `OpenCVLoader.initLocal()` in `SmartScanApp`. Images are BGR.
 - Taxonomy: `TaxonomyNode.endpointId == null` means local and editable. Otherwise the node is remote

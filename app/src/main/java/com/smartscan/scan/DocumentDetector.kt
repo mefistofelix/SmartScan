@@ -319,7 +319,26 @@ object DocumentDetector {
     }
 
     /** Convex, large enough, sane angles and sides, and not just the frame border. */
-    private fun plausible(q: Array<Point>, w: Int, h: Int, frameArea: Double): Boolean {
+    /**
+     * Best corners of the document in an upright color frame, normalized tl,tr,br,bl: the neural model
+     * when it is loaded (falls back to OpenCV only when it is not), always checked for a sane shape.
+     */
+    fun detectNormalized(bgr: Mat, gray: Mat): FloatArray? {
+        val w = bgr.cols()
+        val h = bgr.rows()
+        if (NeuralCorners.ready) {
+            val n = NeuralCorners.detect(bgr) ?: return null
+            val px = Array(4) { Point(n[it * 2].toDouble() * w, n[it * 2 + 1].toDouble() * h) }
+            return if (plausible(px, w, h, w.toDouble() * h, allowOutside = true)) n else null
+        }
+        val chroma = chromaOf(bgr)
+        val q = try { detect(gray, chroma) } finally { chroma.release() } ?: return null
+        return FloatArray(8) { i -> if (i % 2 == 0) (q[i / 2].x / w).toFloat() else (q[i / 2].y / h).toFloat() }
+    }
+
+    private fun plausible(
+        q: Array<Point>, w: Int, h: Int, frameArea: Double, allowOutside: Boolean = false,
+    ): Boolean {
         if (abs(polyArea(q)) < frameArea * MIN_AREA) return false
         val ip = MatOfPoint(*q.map { Point(Math.round(it.x).toDouble(), Math.round(it.y).toDouble()) }.toTypedArray())
         val convex = Imgproc.isContourConvex(ip)
@@ -342,6 +361,8 @@ object DocumentDetector {
             val r = min(sides[i], sides[i + 2]) / max(sides[i], sides[i + 2])
             if (r < MIN_OPPOSITE_RATIO) return false
         }
+        // The neural model may put corners just outside the frame (page partly out of view): fine.
+        if (allowOutside) return true
         val m = 3.0
         val onBorder = q.count { it.x < m || it.y < m || it.x > w - 1 - m || it.y > h - 1 - m }
         return onBorder < 4
@@ -501,4 +522,52 @@ fun ImageProxy.toUprightChroma(buffer: ByteArray? = null): Mat {
     Core.rotate(mat, r, code)
     mat.release()
     return r
+}
+
+/** RGBA_8888 ImageProxy (ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888) as an upright CV_8UC4 Mat. */
+fun ImageProxy.toUprightRgba(buffer: ByteArray? = null): Mat {
+    val plane = planes[0]
+    val buf = plane.buffer
+    val w = width
+    val h = height
+    val rowBytes = w * 4
+    val stride = plane.rowStride
+    val data = if (buffer != null && buffer.size == rowBytes * h) buffer else ByteArray(rowBytes * h)
+    if (stride == rowBytes) {
+        buf.rewind()
+        buf.get(data, 0, rowBytes * h)
+    } else {
+        for (y in 0 until h) {
+            buf.position(y * stride)
+            buf.get(data, y * rowBytes, rowBytes)
+        }
+    }
+    val mat = Mat(h, w, CvType.CV_8UC4)
+    mat.put(0, 0, data)
+    val code = when (imageInfo.rotationDegrees) {
+        90 -> Core.ROTATE_90_CLOCKWISE
+        180 -> Core.ROTATE_180
+        270 -> Core.ROTATE_90_COUNTERCLOCKWISE
+        else -> return mat
+    }
+    val r = Mat()
+    Core.rotate(mat, r, code)
+    mat.release()
+    return r
+}
+
+/** Chroma magnitude |Cr-128| + |Cb-128| of a BGR image (low = neutral white / gray). */
+fun chromaOf(bgr: Mat): Mat {
+    val ycc = Mat()
+    Imgproc.cvtColor(bgr, ycc, Imgproc.COLOR_BGR2YCrCb)
+    val ch = ArrayList<Mat>()
+    Core.split(ycc, ch)
+    ycc.release()
+    val mid = Mat(bgr.size(), CvType.CV_8UC1, org.opencv.core.Scalar(128.0))
+    Core.absdiff(ch[1], mid, ch[1])
+    Core.absdiff(ch[2], mid, ch[2])
+    val out = Mat()
+    Core.add(ch[1], ch[2], out)
+    mid.release(); ch.forEach { it.release() }
+    return out
 }

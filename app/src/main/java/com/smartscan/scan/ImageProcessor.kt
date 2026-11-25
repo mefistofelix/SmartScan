@@ -61,26 +61,9 @@ object ImageProcessor {
         if (color.empty()) return null
         val gray = Mat()
         Imgproc.cvtColor(color, gray, Imgproc.COLOR_BGR2GRAY)
-        // Chroma |Cr-128| + |Cb-128|, same meaning as the live camera one (white paper = low).
-        val ycc = Mat()
-        Imgproc.cvtColor(color, ycc, Imgproc.COLOR_BGR2YCrCb)
-        color.release()
-        val ch = ArrayList<Mat>()
-        Core.split(ycc, ch)
-        ycc.release()
-        val mid = Mat(gray.size(), CvType.CV_8UC1, org.opencv.core.Scalar(128.0))
-        Core.absdiff(ch[1], mid, ch[1])
-        Core.absdiff(ch[2], mid, ch[2])
-        val chroma = Mat()
-        Core.add(ch[1], ch[2], chroma)
-        mid.release(); ch.forEach { it.release() }
-        val q = DocumentDetector.detect(gray, chroma)
-        chroma.release()
-        val w = gray.cols().toDouble()
-        val h = gray.rows().toDouble()
-        gray.release()
-        q ?: return null
-        val c = FloatArray(8) { i -> if (i % 2 == 0) (q[i / 2].x / w).toFloat() else (q[i / 2].y / h).toFloat() }
+        // Same detector as the live preview (neural model, OpenCV fallback), on the sharp full photo.
+        val c = try { DocumentDetector.detectNormalized(color, gray) } finally { color.release(); gray.release() }
+            ?: return null
         return c.map { it.coerceIn(0f, 1f) }.toFloatArray()
     }
 

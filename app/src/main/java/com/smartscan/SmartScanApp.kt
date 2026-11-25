@@ -26,6 +26,8 @@ class SmartScanApp : Application() {
     override fun onCreate() {
         super.onCreate()
         if (!OpenCVLoader.initLocal()) Log.e("SmartScan", "OpenCV non inizializzato")
+        // Neural document corner model: loaded in the background, OpenCV detection is used until it is ready.
+        Thread { com.smartscan.scan.NeuralCorners.init(this) }.start()
         container = AppContainer(this)
         container.appScope.launch {
             runCatching { container.repo.cleanupEmptyDrafts() }
