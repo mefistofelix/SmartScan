@@ -32,7 +32,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,7 +67,6 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -105,6 +106,7 @@ import com.smartscan.HardwareKeys
 import com.smartscan.container
 import com.smartscan.data.DocOutput
 import com.smartscan.data.PageEntity
+import com.smartscan.data.Repository
 import com.smartscan.scan.AutoCaptureController
 import com.smartscan.scan.AutoCaptureController.Phase
 import com.smartscan.scan.DocumentDetector
@@ -138,6 +140,9 @@ import kotlin.math.min
 
 enum class Dictation { PRE, POST, NOTE }
 
+/** A voice note of the document being scanned and the page it was attached to. */
+data class VoiceNote(val text: String, val pageId: Long?)
+
 data class ScannerUi(
     val quad: FloatArray? = null,
     val frameW: Int = 3,
@@ -151,8 +156,9 @@ data class ScannerUi(
     val edges: Boolean = true,
     val deskew: Boolean = true,
     val geo: Boolean = false,
-    /** Voice notes added to the current document. */
-    val noteCount: Int = 0,
+    /** Voice notes added to the current (not yet saved) document; each one can be deleted. */
+    val notes: List<VoiceNote> = emptyList(),
+    val showNotes: Boolean = false,
     val capturing: Boolean = false,
     val processing: Int = 0,
     val voiceOn: Boolean = false,
@@ -415,7 +421,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 docIdFlow.value = c.repo.createDraft()
                 controller.reset()
                 tracker.reset()
-                _ui.update { it.copy(metaSummary = null, showPages = false, noteCount = 0, savedCount = it.savedCount + 1) }
+                _ui.update { it.copy(metaSummary = null, showPages = false, notes = emptyList(), showNotes = false, savedCount = it.savedCount + 1) }
                 notify("Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}")
                 // Straight back to the camera: no dictation prompt in between (pre-dictation only when the scanner opens).
                 if (!closing) resumeCommands()
@@ -452,7 +458,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         return n
     }
 
-    fun togglePages() = _ui.update { it.copy(showPages = !it.showPages && pages.value.isNotEmpty()) }
+    fun togglePages() = _ui.update { it.copy(showPages = !it.showPages && pages.value.isNotEmpty(), showNotes = false) }
 
     fun deletePage(p: PageEntity) {
         viewModelScope.launch {
@@ -561,12 +567,25 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             _ui.update { it.copy(dictation = null) }
             if (!text.isNullOrBlank()) {
                 val id = docIdFlow.first { it != null }!!
-                val doc = c.repo.appendNote(id, text, pages.value.lastOrNull()?.id)
-                _ui.update { it.copy(noteCount = it.noteCount + 1) }
+                val pageId = pages.value.lastOrNull()?.id
+                val doc = c.repo.appendNote(id, text, pageId)
+                val note = VoiceNote(Repository.normalizeNote(text), pageId)
+                _ui.update { it.copy(notes = it.notes + note) }
                 notify("Nota aggiunta" + (doc?.title?.takeIf { it.isNotBlank() }?.let { " · «$it»" } ?: ""))
             }
             if (closing) return@launch
             if (wasOn) startCommands() else _ui.update { it.copy(voiceOn = false) }
+        }
+    }
+
+    fun toggleNotes() = _ui.update { it.copy(showNotes = !it.showNotes && it.notes.isNotEmpty(), showPages = false) }
+
+    fun deleteNote(n: VoiceNote) {
+        viewModelScope.launch {
+            val id = docIdFlow.value ?: return@launch
+            c.repo.removeNote(id, n.text, n.pageId)
+            _ui.update { u -> (u.notes - n).let { rest -> u.copy(notes = rest, showNotes = u.showNotes && rest.isNotEmpty()) } }
+            notify("Nota eliminata")
         }
     }
 
@@ -710,14 +729,20 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         onDispose { HardwareKeys.shutterEnabled = false; sound.release() }
     }
     LaunchedEffect(Unit) { HardwareKeys.events.collect { vm.capture() } }
-    BackHandler { if (ui.showPages) vm.togglePages() else vm.close() }
+    BackHandler {
+        when {
+            ui.showNotes -> vm.toggleNotes()
+            ui.showPages -> vm.togglePages()
+            else -> vm.close()
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (hasCamera) {
             val previewView = remember {
                 PreviewView(context).apply {
-                    // Show the whole 4:3 sensor frame (what is actually captured), not a crop of it.
-                    scaleType = PreviewView.ScaleType.FIT_CENTER
+                    // Full screen. On tall phones the 4:3 photo is wider than what the preview shows.
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 }
             }
@@ -763,9 +788,6 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                     if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, "Luce", ui.torch,
                     activeColor = Color(0xFFFFB300),
                 ) { vm.toggleTorch() }
-                if (ui.voiceAvailable) ToggleIcon(
-                    if (ui.voiceOn) Icons.Filled.Mic else Icons.Filled.MicOff, "Comandi vocali", ui.voiceOn,
-                ) { vm.toggleVoice() }
             }
         }
 
@@ -814,6 +836,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         // Bottom: page strip (optional) + controls in the thumb zone
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
             if (ui.showPages && pages.isNotEmpty()) PageStrip(pages) { vm.deletePage(it) }
+            if (ui.showNotes && ui.notes.isNotEmpty()) NoteList(ui.notes, pages) { vm.deleteNote(it) }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -821,7 +844,10 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                 // Left: current document pages
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        NoteButton(ui.noteCount, active = ui.dictation == Dictation.NOTE) { vm.recordNote() }
+                        NoteButton(
+                            ui.notes.size, active = ui.dictation == Dictation.NOTE,
+                            onList = { vm.toggleNotes() },
+                        ) { vm.recordNote() }
                         Spacer(Modifier.height(10.dp))
                         PagesButton(pages, ui.processing) { vm.togglePages() }
                     }
@@ -850,17 +876,45 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
     }
 }
 
-/** Dictates a note for the current document (repeatable). The badge counts the notes added. */
+/**
+ * Tap: dictate a note for the current document (repeatable). The badge counts the notes;
+ * tapping the badge or a long press shows them, each with a delete button.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NoteButton(count: Int, active: Boolean, onClick: () -> Unit) {
+private fun NoteButton(count: Int, active: Boolean, onList: () -> Unit, onClick: () -> Unit) {
     Box(Modifier.size(width = 60.dp, height = 52.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier.size(48.dp).clip(CircleShape)
                 .background(if (active) MaterialTheme.colorScheme.tertiary else Color(0x99000000))
-                .clickable(onClick = onClick),
+                .combinedClickable(onClick = onClick, onLongClick = { if (count > 0) onList() }),
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.EditNote, "Nota vocale", tint = Color.White) }
-        if (count > 0) Badge(Modifier.align(Alignment.TopEnd)) { Text("$count") }
+        if (count > 0) Badge(Modifier.align(Alignment.TopEnd).clickable(onClick = onList)) {
+            Text("$count", modifier = Modifier.padding(horizontal = 2.dp))
+        }
+    }
+}
+
+/** Notes of the document being scanned, newest last; X deletes one. */
+@Composable
+private fun NoteList(notes: List<VoiceNote>, pages: List<PageEntity>, onDelete: (VoiceNote) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().background(Color(0xB3000000)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        for (n in notes) {
+            val page = pages.indexOfFirst { it.id == n.pageId }.takeIf { it >= 0 }?.let { "p.${it + 1} · " } ?: ""
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    page + n.text, color = Color.White, style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2, modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onDelete(n) }) {
+                    Icon(Icons.Filled.Close, "Elimina nota", tint = Color.White)
+                }
+            }
+        }
     }
 }
 
@@ -941,7 +995,8 @@ private fun OutputToggle(output: DocOutput, onClick: () -> Unit) {
 }
 
 
-/** Compact round toggle for the scanner top bar: filled when on. */
+/** Compact round toggle for the scanner top bar: filled when on. Long press shows its name. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ToggleIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -950,9 +1005,13 @@ private fun ToggleIcon(
     activeColor: Color = MaterialTheme.colorScheme.primary,
     onClick: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     Box(
         Modifier.size(40.dp).clip(CircleShape).background(if (on) activeColor else Color(0x66000000))
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { Toast.makeText(ctx, label + if (on) ": attivo" else ": spento", Toast.LENGTH_SHORT).show() },
+            ),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp)) }
 }
@@ -996,7 +1055,7 @@ private fun QuadOverlay(ui: ScannerUi, modifier: Modifier) {
         val q = ui.quad ?: return@Canvas
         val iw = ui.frameW.toFloat()
         val ih = ui.frameH.toFloat()
-        val s = min(size.width / iw, size.height / ih) // matches PreviewView FIT_CENTER
+        val s = max(size.width / iw, size.height / ih) // matches PreviewView FILL_CENTER
         val dx = (size.width - iw * s) / 2
         val dy = (size.height - ih * s) / 2
         fun p(i: Int) = Offset(q[i * 2] * iw * s + dx, q[i * 2 + 1] * ih * s + dy)

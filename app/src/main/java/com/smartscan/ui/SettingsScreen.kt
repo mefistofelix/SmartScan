@@ -58,7 +58,6 @@ fun SettingsScreen(onClose: () -> Unit) {
             Choice("Formato pagina PDF", PdfPageSize.entries, s.pageSize, { it.label }) { s.pageSize = it }
 
             Section("Voce")
-            Toggle("Comandi vocali durante la scansione", "«scatta», «fine documento», «nuovo documento», «annulla ultima»…", s.voiceCommands) { s.voiceCommands = it }
             Toggle("Detta metadati a inizio documento", "All'apertura della fotocamera", s.voiceMetaPre) { s.voiceMetaPre = it }
             Toggle("Detta metadati a fine documento", "Dopo «Fine», prima di salvare", s.voiceMetaPost) { s.voiceMetaPost = it }
             Toggle("Crea tag sconosciuti", "I tag dettati che non esistono vengono creati in locale", s.createUnknownTags) { s.createUnknownTags = it }

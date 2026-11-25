@@ -160,7 +160,6 @@ class Repository(private val context: Context, val db: AppDatabase) {
     suspend fun addDocNodes(docId: Long, ids: Collection<Long>) =
         tax.insertRefs(ids.map { DocNodeRef(docId, it) })
 
-    /** Parses a spoken phrase and applies title / notes / date / categories / tags to [docId]. */
     /**
      * Appends a dictated note to the document notes (one line per dictation) and, when [pageId] is
      * given, to that page's own note. While the document has
@@ -168,7 +167,7 @@ class Repository(private val context: Context, val db: AppDatabase) {
      */
     suspend fun appendNote(docId: Long, text: String, pageId: Long? = null): DocumentEntity? {
         val doc = docs.get(docId) ?: return null
-        val t = text.trim().replaceFirstChar { it.uppercase() }
+        val t = normalizeNote(text)
         if (t.isEmpty()) return doc
         pageId?.let { pagesDao.get(it) }?.let { p ->
             pagesDao.update(p.copy(note = if (p.note.isBlank()) t else p.note + "\n" + t))
@@ -179,6 +178,22 @@ class Repository(private val context: Context, val db: AppDatabase) {
         )
         updateDoc(upd)
         return upd
+    }
+
+    /**
+     * Removes one dictated note (the last line equal to [text]) from the document and its page. A title that
+     * was taken from this note is cleared, so the automatic name or the next note applies.
+     */
+    suspend fun removeNote(docId: Long, text: String, pageId: Long?) {
+        fun drop(all: String): String {
+            val lines = all.split("\n").toMutableList()
+            val i = lines.lastIndexOf(text)
+            if (i >= 0) lines.removeAt(i)
+            return lines.joinToString("\n")
+        }
+        pageId?.let { pagesDao.get(it) }?.let { p -> pagesDao.update(p.copy(note = drop(p.note))) }
+        val doc = docs.get(docId) ?: return
+        updateDoc(doc.copy(notes = drop(doc.notes), title = if (doc.title == titleFrom(text)) "" else doc.title))
     }
 
     private fun titleFrom(note: String): String {
@@ -192,6 +207,7 @@ class Repository(private val context: Context, val db: AppDatabase) {
         return sb.toString().take(50).trimEnd(',', '.', ';', ':')
     }
 
+    /** Parses a spoken phrase and applies title / notes / date / categories / tags to [docId]. */
     suspend fun applyVoiceMetadata(docId: Long, text: String, createTags: Boolean): ParsedMetadata {
         val parsed = MetadataParser.parse(text, tax.all())
         val doc = docs.get(docId) ?: return parsed
@@ -222,6 +238,8 @@ class Repository(private val context: Context, val db: AppDatabase) {
     }
 
     companion object {
+        fun normalizeNote(text: String) = text.trim().replaceFirstChar { it.uppercase() }
+
         fun nodePath(n: TaxonomyNode, byId: Map<Long, TaxonomyNode>): String {
             val parts = ArrayList<String>()
             var cur: TaxonomyNode? = n

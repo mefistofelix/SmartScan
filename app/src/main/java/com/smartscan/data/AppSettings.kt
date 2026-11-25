@@ -45,8 +45,9 @@ class AppSettings(context: Context) {
     /** Open the camera right away when the app starts (the archive stays below it). */
     var startInScanner: Boolean
         get() = bool("startInScanner", true); set(v) = setBool("startInScanner", v)
+    /** Continuous voice commands were removed from the UI (only dictated notes remain); kept off. */
     var voiceCommands: Boolean
-        get() = bool("voiceCommands", false); set(v) = setBool("voiceCommands", v)
+        get() = false; set(_) = Unit
     var voiceMetaPre: Boolean
         get() = bool("voiceMetaPre", false); set(v) = setBool("voiceMetaPre", v)
     var voiceMetaPost: Boolean
