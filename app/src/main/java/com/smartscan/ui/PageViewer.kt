@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
@@ -134,6 +135,7 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
     }
 
     fun set(s: Float, o: Offset) {
+        if (s.isNaN() || o.x.isNaN() || o.y.isNaN()) return
         scale = s.coerceIn(1f, MAX_ZOOM)
         offset = if (scale == 1f) Offset.Zero else clamp(o, scale)
         onZoomed(scale > 1f)
@@ -160,8 +162,10 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
                     do {
                         val event = awaitPointerEvent()
                         val zoom = event.calculateZoom()
-                        if (zoom != 1f || scale > 1f) {
-                            val c = event.calculateCentroid() - Offset(size.width / 2f, size.height / 2f)
+                        // When the last finger lifts there is no centroid (NaN): ignore that event.
+                        val centroid = event.calculateCentroid()
+                        if (centroid.isSpecified && !zoom.isNaN() && (zoom != 1f || scale > 1f)) {
+                            val c = centroid - Offset(size.width / 2f, size.height / 2f)
                             val newScale = (scale * zoom).coerceIn(1f, MAX_ZOOM)
                             val z = newScale / scale
                             set(newScale, (offset - c) * z + c + event.calculatePan())
@@ -182,6 +186,7 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
                 val k = fit.width * scale / img.width
                 val x0 = (size.width - fit.width * scale) / 2f + offset.x
                 val y0 = (size.height - fit.height * scale) / 2f + offset.y
+                if (!(k > 0f) || x0.isNaN() || y0.isNaN()) return@Canvas
                 val left = max(0f, x0)
                 val top = max(0f, y0)
                 val right = min(size.width.toFloat(), x0 + fit.width * scale)
