@@ -36,6 +36,10 @@ object NeuralCorners {
     private var totalMs = 0L
     /** Heatmap peak of each corner in the last [detect] call (diagnostics). */
     val lastPeaks = FloatArray(4)
+    /** Input padding (fraction of the frame on each side) and how it is filled; tuned with [CornerDebug]. */
+    var padding = 0.12f
+    var borderType = org.opencv.core.Core.BORDER_CONSTANT
+    var borderFill = 128.0
 
     val ready: Boolean get() = session != null
 
@@ -100,12 +104,23 @@ object NeuralCorners {
      * Detects the 4 corners in [bgr] (CV_8UC3, upright). Returns normalized tl,tr,br,bl (0..1, may be
      * slightly outside the frame) or null when the model is not confident.
      */
-    fun detect(bgr: Mat): FloatArray? {
+    fun detect(bgr: Mat, pad: Float = padding, border: Int = borderType, fill: Double = borderFill): FloatArray? {
         val s = session ?: return null
         val e = env ?: return null
         val t0 = SystemClock.elapsedRealtime()
-        val small = Mat()
-        Imgproc.resize(bgr, small, Size(SIDE.toDouble(), SIDE.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        // The frame is shrunk into the middle of the input with a border around it: the model misses corners that
+        // touch the image edge (a document filling the frame), it was trained with background around pages.
+        val inner = Math.round(SIDE / (1 + 2 * pad))
+        val off = (SIDE - inner) / 2
+        val resized = Mat()
+        Imgproc.resize(bgr, resized, Size(inner.toDouble(), inner.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        val small = if (off == 0 && inner == SIDE) resized else Mat().also {
+            org.opencv.core.Core.copyMakeBorder(
+                resized, it, off, SIDE - inner - off, off, SIDE - inner - off, border,
+                org.opencv.core.Scalar(fill, fill, fill),
+            )
+            resized.release()
+        }
         val px = ByteArray(SIDE * SIDE * 3)
         small.get(0, 0, px)
         small.release()
@@ -138,8 +153,8 @@ object NeuralCorners {
                 }
                 for (c in 0 until 4) {
                     val p = peak(data, c * h * w, w, h) ?: return null
-                    result[c * 2] = p.first
-                    result[c * 2 + 1] = p.second
+                    result[c * 2] = (p.first * SIDE - off) / inner
+                    result[c * 2 + 1] = (p.second * SIDE - off) / inner
                 }
                 return orderNormalized(result)
             }
@@ -196,8 +211,19 @@ object CornerDebug {
         for (f in files) {
             val bgr = org.opencv.imgcodecs.Imgcodecs.imread(f.absolutePath, org.opencv.imgcodecs.Imgcodecs.IMREAD_REDUCED_COLOR_4)
             if (bgr.empty()) continue
+            val variants = listOf(
+                "none" to Triple(0f, org.opencv.core.Core.BORDER_CONSTANT, 0.0),
+                "black12" to Triple(0.12f, org.opencv.core.Core.BORDER_CONSTANT, 0.0),
+                "gray12" to Triple(0.12f, org.opencv.core.Core.BORDER_CONSTANT, 128.0),
+                "repl12" to Triple(0.12f, org.opencv.core.Core.BORDER_REPLICATE, 0.0),
+                "gray20" to Triple(0.20f, org.opencv.core.Core.BORDER_CONSTANT, 128.0),
+            )
+            val per = variants.joinToString(" ") { (name, v) ->
+                NeuralCorners.detect(bgr, v.first, v.second, v.third)
+                name + "=" + NeuralCorners.lastPeaks.joinToString("/") { "%.2f".format(java.util.Locale.US, it) }
+            }
             val raw = NeuralCorners.detect(bgr)
-            val peaks = NeuralCorners.lastPeaks.joinToString { "%.2f".format(java.util.Locale.US, it) }
+            val peaks = per
             val gray = Mat()
             Imgproc.cvtColor(bgr, gray, Imgproc.COLOR_BGR2GRAY)
             val ok = DocumentDetector.detectNormalized(bgr, gray)
