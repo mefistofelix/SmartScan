@@ -55,12 +55,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Crop
-import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
@@ -854,9 +854,9 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                 // Tristate: Auto -> Bordi -> Spento
                 ToggleIcon(
                     when {
-                        ui.edges && ui.auto -> Icons.Filled.AutoMode
+                        ui.edges && ui.auto -> Icons.Filled.DocumentScanner
                         ui.edges -> Icons.Filled.Crop
-                        else -> Icons.Filled.CropFree
+                        else -> Icons.Filled.Image
                     },
                     when {
                         ui.edges && ui.auto -> "Rilevamento: Auto"
