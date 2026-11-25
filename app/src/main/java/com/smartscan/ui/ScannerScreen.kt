@@ -115,6 +115,7 @@ import coil.compose.AsyncImage
 import com.smartscan.HardwareKeys
 import com.smartscan.container
 import com.smartscan.data.DocOutput
+import com.smartscan.data.DocStatus
 import com.smartscan.data.PageEntity
 import com.smartscan.data.Repository
 import com.smartscan.scan.AutoCaptureController
@@ -244,15 +245,40 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private var dictationCont: CancellableContinuation<String?>? = null
     private var noticeJob: Job? = null
     private var closing = false
+    /** Pages captured in this session (used when adding pages to a saved document). */
+    private var addedPages = 0
 
     init {
         viewModelScope.launch {
-            docIdFlow.value = if (existingDocId > 0) existingDocId else c.repo.createDraft()
+            val id = if (existingDocId > 0) existingDocId else resumeOrCreateDraft()
+            docIdFlow.value = id
+            restoreNotes(id)
+            if (!addingToExisting) c.repo.pageCount(id).takeIf { it > 0 }?.let { notify(str(R.string.resumed_pages, it)) }
+            c.repo.getDoc(id)?.let { d -> _ui.update { it.copy(output = d.output) } }
         }
         _ui.update { it.copy(voiceAvailable = voice.available) }
         viewModelScope.launch {
             c.repo.observeEndpoints().collect { eps -> _ui.update { it.copy(canUpload = eps.any { e -> e.autoUpload }) } }
         }
+    }
+
+    /** The unsaved scanner draft survives closing the scanner or the app: reopen it with its pages. */
+    private suspend fun resumeOrCreateDraft(): Long {
+        val saved = settings.scannerDraftId
+        val d = if (saved > 0) c.repo.getDoc(saved) else null
+        if (d != null && d.status == DocStatus.DRAFT) return saved
+        return newDraft()
+    }
+
+    private suspend fun newDraft(): Long = c.repo.createDraft().also { settings.scannerDraftId = it }
+
+    /** Notes of a resumed document, so they can still be listed and deleted. */
+    private suspend fun restoreNotes(id: Long) {
+        val doc = c.repo.getDoc(id) ?: return
+        if (addingToExisting && doc.status != DocStatus.DRAFT) return
+        val notes = c.repo.pages(id).flatMap { p -> p.note.split("\n").filter { it.isNotBlank() }.map { VoiceNote(it, p.id) } } +
+            doc.notes.split("\n").filter { it.isNotBlank() }.map { VoiceNote(it, null) }
+        _ui.update { it.copy(notes = notes) }
     }
 
     // ---------- camera ----------
@@ -424,6 +450,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                                 id, raw, hint?.takeIf { u.edges }, settings.defaultFilter, u.deskew,
                                 detect = u.edges, hq = u.hq, lat = loc?.latitude, lon = loc?.longitude,
                             )
+                            addedPages++
                         } catch (e: Exception) {
                             Log.e("Scanner", "process", e)
                             events.tryEmit(ScanEvent.Message(str(R.string.err_processing, e.message.orEmpty())))
@@ -465,7 +492,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                     if (!text.isNullOrBlank()) c.repo.applyVoiceMetadata(id, text, settings.createUnknownTags)
                 }
                 val n = save(id)
-                docIdFlow.value = c.repo.createDraft()
+                docIdFlow.value = newDraft()
                 controller.reset()
                 tracker.reset()
                 _ui.update { it.copy(metaSummary = null, showPages = false, notes = emptyList(), showNotes = false, savedCount = it.savedCount + 1) }
@@ -481,7 +508,11 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         }
     }
 
-    /** Leaving the scanner: pending pages are saved, never thrown away. */
+    /**
+     * Leaving the scanner. The scanner draft is kept as it is (not saved): next time the scanner opens
+     * with its pages, ready for «Fine» or more pages. Pages added to a saved document are finalized
+     * (OCR, uploads) again.
+     */
     fun close() {
         if (closing) return
         closing = true
@@ -490,11 +521,16 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         viewModelScope.launch {
             ui.first { it.processing == 0 && !it.capturing && !it.saving }
             val id = docIdFlow.value
-            if (id != null && !addingToExisting) {
-                if (c.repo.pageCount(id) == 0) c.repo.deleteDoc(id)
-                else {
-                    save(id)
-                    events.emit(ScanEvent.Message(str(R.string.doc_saved)))
+            if (id != null) {
+                val doc = c.repo.getDoc(id)
+                if (!addingToExisting) {
+                    if (c.repo.pageCount(id) == 0) {
+                        c.repo.deleteDoc(id)
+                        settings.scannerDraftId = 0L
+                    }
+                } else if (doc != null && doc.status != DocStatus.DRAFT && addedPages > 0) {
+                    c.repo.markProcessing(id, null, null)
+                    c.sync.enqueueFinalize(id)
                 }
             }
             events.emit(ScanEvent.Closed)
@@ -510,6 +546,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     }
 
     fun togglePages() = _ui.update { it.copy(showPages = !it.showPages && pages.value.isNotEmpty(), showNotes = false) }
+
+    fun movePage(p: PageEntity, delta: Int) = viewModelScope.launch { c.repo.movePage(p, delta) }
 
     fun deletePage(p: PageEntity) {
         viewModelScope.launch {
@@ -773,7 +811,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
     val pages by vm.pages.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
     SideEffect { vm.viewerOpen = viewing != null }
-    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it, pages.map { p -> p.note }) { viewing = null } }
     val partial by vm.voicePartial.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
     val view = LocalView.current
@@ -964,7 +1002,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
 
         // Bottom: page strip (optional) + controls in the thumb zone
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
-            if (ui.showPages && pages.isNotEmpty()) PageStrip(pages, onOpen = { viewing = it }) { vm.deletePage(it) }
+            if (ui.showPages && pages.isNotEmpty()) PageStrip(pages, onOpen = { viewing = it }, onMove = { p, d -> vm.movePage(p, d) }) { vm.deletePage(it) }
             if (ui.showNotes && ui.notes.isNotEmpty()) NoteList(ui.notes, pages) { vm.deleteNote(it) }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
@@ -1074,31 +1112,21 @@ private fun PagesButton(pages: List<PageEntity>, processing: Int, onClick: () ->
 }
 
 @Composable
-private fun PageStrip(pages: List<PageEntity>, onOpen: (Int) -> Unit, onDelete: (PageEntity) -> Unit) {
-    LazyRow(
-        Modifier.fillMaxWidth().background(Color(0x99000000)).padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp),
-    ) {
-        itemsIndexed(pages, key = { _, p -> p.id }) { i, p ->
-            Box(Modifier.size(width = 66.dp, height = 88.dp)) {
-                AsyncImage(
-                    model = File(p.processedPath), contentDescription = str(R.string.page_n, i + 1),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).clickable { onOpen(i) }
-                )
-                Text(
-                    "${i + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
-                        .clip(RoundedCornerShape(4.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp)
-                )
-                Box(
-                    Modifier.align(Alignment.TopEnd).padding(2.dp).size(24.dp).clip(CircleShape)
-                        .background(Color(0xCC000000)).clickable { onDelete(p) },
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Close, str(R.string.delete_page), tint = Color.White, modifier = Modifier.size(16.dp)) }
-            }
-        }
+private fun PageStrip(pages: List<PageEntity>, onOpen: (Int) -> Unit, onMove: (PageEntity, Int) -> Unit, onDelete: (PageEntity) -> Unit) {
+    PageRow(
+        pages, Modifier.fillMaxWidth().background(Color(0x99000000)).padding(vertical = 10.dp),
+        onTap = onOpen, onMove = onMove,
+    ) { i, p ->
+        Text(
+            "${i + 1}" + if (p.note.isNotBlank()) " ✎" else "", color = Color.White, style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+                .clip(RoundedCornerShape(4.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp)
+        )
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(2.dp).size(24.dp).clip(CircleShape)
+                .background(Color(0xCC000000)).clickable { onDelete(p) },
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Filled.Close, str(R.string.delete_page), tint = Color.White, modifier = Modifier.size(16.dp)) }
     }
 }
 

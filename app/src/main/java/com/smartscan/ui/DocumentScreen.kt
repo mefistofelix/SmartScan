@@ -10,6 +10,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Image
@@ -94,6 +96,7 @@ class DocumentViewModel(app: Application, val docId: Long) : AndroidViewModel(ap
     val uploads = c.repo.observeUploads(docId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val endpoints = c.repo.observeEndpoints().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val busy = MutableStateFlow(false)
+    fun movePage(p: com.smartscan.data.PageEntity, delta: Int) = viewModelScope.launch { c.repo.movePage(p, delta) }
     val shares = MutableSharedFlow<Intent>(extraBufferCapacity = 2)
     val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
 
@@ -136,14 +139,14 @@ class DocumentViewModel(app: Application, val docId: Long) : AndroidViewModel(ap
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
+fun DocumentScreen(docId: Long, onEdit: () -> Unit, onAddPages: () -> Unit, onClose: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as Application
     val vm: DocumentViewModel = viewModel(key = "doc_$docId") { DocumentViewModel(app, docId) }
     val doc by vm.doc.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
-    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it, pages.map { p -> p.note }) { viewing = null } }
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val nodeIds by vm.nodeIds.collectAsStateWithLifecycle()
     val uploads by vm.uploads.collectAsStateWithLifecycle()
@@ -168,6 +171,7 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
             },
             navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
             actions = {
+                IconButton(onClick = onAddPages) { Icon(Icons.Filled.AddAPhoto, str(R.string.add_pages)) }
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, str(R.string.edit)) }
                 IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, str(R.string.delete)) }
             },
@@ -192,9 +196,31 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
                 if (d.notes.isNotBlank()) Text(d.notes, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 8.dp))
             }
             item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(pages, key = { _, p -> p.id }) { i, p ->
-                        Thumb(p.processedPath, Modifier.size(96.dp, 128.dp).clickable { viewing = i })
+                PageRow(
+                    pages, Modifier.fillMaxWidth(), width = 96.dp, height = 128.dp,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                    onTap = { viewing = it }, onMove = { p, delta -> vm.movePage(p, delta) },
+                ) { i, p ->
+                    Text(
+                        "${i + 1}" + if (p.note.isNotBlank()) " ✎" else "",
+                        color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(4.dp)
+                            .background(androidx.compose.ui.graphics.Color(0x99000000)).padding(horizontal = 4.dp),
+                    )
+                }
+                Text(
+                    str(R.string.pages_hint), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp),
+                )
+                val noted = pages.withIndex().filter { it.value.note.isNotBlank() }
+                if (noted.isNotEmpty()) {
+                    Text(str(R.string.page_notes), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+                    noted.forEach { (i, p) ->
+                        Text(
+                            str(R.string.page_n, i + 1) + ": " + p.note.replace("\n", " · "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth().clickable { viewing = i }.padding(vertical = 4.dp),
+                        )
                     }
                 }
                 Spacer(Modifier.height(16.dp))

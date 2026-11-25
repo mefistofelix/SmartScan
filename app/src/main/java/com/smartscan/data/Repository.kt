@@ -129,6 +129,11 @@ class Repository(private val context: Context, val db: AppDatabase) {
         pagesDao.updateAll(pagesDao.list(p.docId).mapIndexed { i, it -> it.copy(position = i) })
     }
 
+    suspend fun setPageNote(pageId: Long, note: String) {
+        val p = pagesDao.get(pageId) ?: return
+        if (p.note != note) pagesDao.update(p.copy(note = note))
+    }
+
     suspend fun movePage(p: PageEntity, delta: Int) {
         val list = pagesDao.list(p.docId).toMutableList()
         val i = list.indexOfFirst { it.id == p.id }
@@ -189,12 +194,12 @@ class Repository(private val context: Context, val db: AppDatabase) {
         val doc = docs.get(docId) ?: return null
         val t = normalizeNote(text)
         if (t.isEmpty()) return doc
-        pageId?.let { pagesDao.get(it) }?.let { p ->
-            pagesDao.update(p.copy(note = if (p.note.isBlank()) t else p.note + "\n" + t))
-        }
+        val page = pageId?.let { pagesDao.get(it) }
+        if (page != null) pagesDao.update(page.copy(note = if (page.note.isBlank()) t else page.note + "\n" + t))
+        // A note belongs to its page; only a note dictated before the first page goes to the document notes.
         val upd = doc.copy(
             title = doc.title.ifBlank { titleFrom(t) },
-            notes = if (doc.notes.isBlank()) t else doc.notes + "\n" + t,
+            notes = if (page != null) doc.notes else if (doc.notes.isBlank()) t else doc.notes + "\n" + t,
         )
         updateDoc(upd)
         return upd
@@ -211,9 +216,10 @@ class Repository(private val context: Context, val db: AppDatabase) {
             if (i >= 0) lines.removeAt(i)
             return lines.joinToString("\n")
         }
-        pageId?.let { pagesDao.get(it) }?.let { p -> pagesDao.update(p.copy(note = drop(p.note))) }
+        val page = pageId?.let { pagesDao.get(it) }
+        page?.let { p -> pagesDao.update(p.copy(note = drop(p.note))) }
         val doc = docs.get(docId) ?: return
-        updateDoc(doc.copy(notes = drop(doc.notes), title = if (doc.title == titleFrom(text)) "" else doc.title))
+        updateDoc(doc.copy(notes = if (page != null) doc.notes else drop(doc.notes), title = if (doc.title == titleFrom(text)) "" else doc.title))
     }
 
     private fun titleFrom(note: String): String {

@@ -111,6 +111,7 @@ fun AppNav() {
             DocumentScreen(
                 docId = id,
                 onEdit = { nav.navigate("review/$id") },
+                onAddPages = { nav.navigate("scanner/$id") },
                 onClose = { nav.popBackStack() },
             )
         }

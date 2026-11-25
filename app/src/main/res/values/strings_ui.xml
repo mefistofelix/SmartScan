@@ -242,4 +242,9 @@
     <string name="headers_value">Headers: %1$s</string>
     <string name="authorization_optional">Authorization (optional)</string>
     <string name="delete_node_title">Delete «%1$s»?</string>
+    <string name="page_note">Page note</string>
+    <string name="page_notes">Page notes</string>
+    <string name="add_pages">Add pages</string>
+    <string name="resumed_pages">%1$d unsaved pages: go on scanning or tap Done</string>
+    <string name="pages_hint">Tap to view, long press and drag to reorder</string>
 </resources>

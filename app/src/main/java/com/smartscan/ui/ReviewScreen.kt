@@ -59,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +93,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -133,6 +135,7 @@ class ReviewViewModel(app: Application, val docId: Long) : AndroidViewModel(app)
     fun rotate(p: PageEntity) = rerender(p.copy(rotation = (p.rotation + 90) % 360))
     fun delete(p: PageEntity) = viewModelScope.launch { c.repo.deletePage(p) }
     fun move(p: PageEntity, delta: Int) = viewModelScope.launch { c.repo.movePage(p, delta) }
+    fun setPageNote(pageId: Long, note: String) = viewModelScope.launch { c.repo.setPageNote(pageId, note) }
     fun setNodes(ids: Set<Long>) = viewModelScope.launch { c.repo.setDocNodes(docId, ids) }
     fun createNode(kind: NodeKind, name: String) = viewModelScope.launch {
         val id = c.repo.addNode(kind, name, null)
@@ -183,7 +186,7 @@ fun ReviewScreen(
     val doc by vm.doc.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
-    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it, pages.map { p -> p.note }) { viewing = null } }
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val endpoints by vm.endpoints.collectAsStateWithLifecycle()
     val nodeIds by vm.nodeIds.collectAsStateWithLifecycle()
@@ -241,6 +244,16 @@ fun ReviewScreen(
                 }
             }
             val current = pages.getOrNull(pager.currentPage)
+            if (pages.size > 1) PageRow(
+                pages, Modifier.fillMaxWidth().padding(vertical = 6.dp), width = 48.dp, height = 64.dp,
+                selectedId = current?.id, contentPadding = PaddingValues(horizontal = 12.dp),
+                onTap = { scope.launch { pager.animateScrollToPage(it) } },
+                onMove = { p, delta ->
+                    val wasCurrent = p.id == current?.id
+                    vm.move(p, delta)
+                    if (wasCurrent) scope.launch { pager.scrollToPage((pager.currentPage + delta).coerceIn(0, pages.lastIndex)) }
+                },
+            )
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -276,6 +289,18 @@ fun ReviewScreen(
                         }
                     },
                 )
+                if (current != null) {
+                    var pageNote by remember(current.id) { mutableStateOf(current.note) }
+                    LaunchedEffect(current.id, pageNote) {
+                        delay(400)
+                        if (pageNote != current.note) vm.setPageNote(current.id, pageNote)
+                    }
+                    OutlinedTextField(
+                        value = pageNote, onValueChange = { pageNote = it },
+                        label = { Text(str(R.string.page_note) + " · " + str(R.string.page_n, pager.currentPage + 1)) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 3,
+                    )
+                }
                 if (listening) Text("🎙 " + partial.ifBlank { str(R.string.speak_meta_hint) }, style = MaterialTheme.typography.bodySmall)
                 summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                 val byId = nodes.associateBy { it.id }

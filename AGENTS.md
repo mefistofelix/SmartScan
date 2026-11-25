@@ -58,7 +58,7 @@ app/src/main/java/com/smartscan/
   re-insert remote nodes: that cascades away document assignments.
 - Document lifecycle: `DRAFT` (scanning/review) -> `PROCESSING` (saved; OCR queued) -> `READY`.
 - Scanner flow is continuous: no single/multi mode. «Done» (`ScannerViewModel.finishDocument`) saves the draft
-  and scanning goes on into a new draft. Closing the scanner saves pending pages. `DocumentEntity.output`
+  and scanning goes on into a new draft. Closing the scanner (or the app) does not save: the draft id is kept in `AppSettings.scannerDraftId` and the scanner reopens it with its pages. `scanner/{docId}` on a saved document adds pages and re-finalizes it on close. Voice notes are per page (`PageEntity.note`); only a note dictated before the first page goes to `DocumentEntity.notes`. `DocumentEntity.output`
   (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
 - Room schema changes need a `Migration` in `AppDatabase` (current version 5). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).

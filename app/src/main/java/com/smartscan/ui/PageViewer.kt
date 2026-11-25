@@ -69,7 +69,7 @@ private const val MAX_ZOOM = 8f
  * Pages are decoded near full resolution so the scan quality can be checked.
  */
 @Composable
-fun PageViewer(paths: List<String>, start: Int, onDismiss: () -> Unit) {
+fun PageViewer(paths: List<String>, start: Int, notes: List<String> = emptyList(), onDismiss: () -> Unit) {
     if (paths.isEmpty()) return
     Dialog(
         onDismissRequest = onDismiss,
@@ -87,6 +87,14 @@ fun PageViewer(paths: List<String>, start: Int, onDismiss: () -> Unit) {
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(50))
                         .background(Color(0x99000000)),
                 ) { Icon(Icons.Filled.Close, str(R.string.close), tint = Color.White) }
+                notes.getOrNull(pager.currentPage)?.takeIf { it.isNotBlank() }?.let { n ->
+                    Text(
+                        n, color = Color.White, style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 56.dp)
+                            .clip(RoundedCornerShape(8.dp)).background(Color(0x99000000))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
                 if (paths.size > 1) Text(
                     "${pager.currentPage + 1} / ${paths.size}",
                     color = Color.White, style = MaterialTheme.typography.labelLarge,

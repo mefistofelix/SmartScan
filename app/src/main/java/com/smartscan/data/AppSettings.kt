@@ -57,6 +57,10 @@ class AppSettings(context: Context) {
     /** Scanner light left on: restored when the scanner opens again or the app returns to the foreground. */
     var torchOn: Boolean
         get() = bool("torchOn", false); set(v) = setBool("torchOn", v)
+
+    /** Draft the scanner is filling: it survives closing the scanner or the app and is resumed next time (0 = none). */
+    var scannerDraftId: Long
+        get() = p.getLong("scannerDraftId", 0L); set(v) = p.edit().putLong("scannerDraftId", v).apply()
     /** Scanner: documents finished with «Fine» go to the auto-upload endpoints (false = keep local). */
     var uploadOnFinish: Boolean
         get() = bool("uploadOnFinish", true); set(v) = setBool("uploadOnFinish", v)

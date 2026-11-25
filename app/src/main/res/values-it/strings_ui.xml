@@ -242,4 +242,9 @@
     <string name="headers_value">Intestazioni: %1$s</string>
     <string name="authorization_optional">Authorization (opzionale)</string>
     <string name="delete_node_title">Eliminare «%1$s»?</string>
+    <string name="page_note">Nota della pagina</string>
+    <string name="page_notes">Note delle pagine</string>
+    <string name="add_pages">Aggiungi pagine</string>
+    <string name="resumed_pages">%1$d pagine non salvate: continua a scansionare o tocca Fine</string>
+    <string name="pages_hint">Tocca per vedere, tieni premuto e trascina per riordinare</string>
 </resources>
