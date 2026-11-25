@@ -58,7 +58,8 @@ class Repository(private val context: Context, val db: AppDatabase) {
         ids.forEachIndexed { i, id -> docs.setSortKey(id, distinct[i]) }
     }
 
-    suspend fun cleanupEmptyDrafts() = docs.emptyDraftIds().forEach { deleteDoc(it) }
+    /** Empty drafts left behind (older than a minute; the scanner draft is kept). */
+    suspend fun cleanupEmptyDrafts(keep: Long) = docs.emptyDraftIds(System.currentTimeMillis() - 60_000, keep).forEach { deleteDoc(it) }
 
     /** Marks the document as complete; OCR + uploads are then enqueued by SyncManager. */
     suspend fun markProcessing(

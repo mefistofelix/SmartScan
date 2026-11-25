@@ -27,8 +27,8 @@ interface DocumentDao {
 
     @Query("UPDATE documents SET sortKey = :key WHERE id = :id") suspend fun setSortKey(id: Long, key: Long)
 
-    @Query("SELECT id FROM documents WHERE status = 'DRAFT' AND id NOT IN (SELECT docId FROM pages)")
-    suspend fun emptyDraftIds(): List<Long>
+    @Query("SELECT id FROM documents WHERE status = 'DRAFT' AND createdAt < :before AND id != :keep AND id NOT IN (SELECT docId FROM pages)")
+    suspend fun emptyDraftIds(before: Long, keep: Long): List<Long>
 }
 
 @Dao

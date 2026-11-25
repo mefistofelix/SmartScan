@@ -41,7 +41,7 @@ class SmartScanApp : Application() {
         Thread { com.smartscan.scan.NeuralCorners.init(this) }.start()
         container = AppContainer(this)
         container.appScope.launch {
-            runCatching { container.repo.cleanupEmptyDrafts() }
+            runCatching { container.repo.cleanupEmptyDrafts(keep = container.settings.scannerDraftId) }
             runCatching { container.sync.syncAllTaxonomies() }
         }
     }
