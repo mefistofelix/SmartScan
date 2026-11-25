@@ -35,19 +35,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.Canvas
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.unit.IntOffset
+import coil.imageLoader
+import coil.request.SuccessResult
 import java.io.File
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Largest side decoded for the viewer: native resolution for normal pages, enough to judge HQ pages. */
 private const val VIEWER_MAX_SIDE = 4096
@@ -98,9 +109,19 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
         offset = Offset.Zero
     }
 
+    var image by remember(path) { mutableStateOf<ImageBitmap?>(null) }
+
+    /** Image size on screen at zoom 1 (fit inside the viewport). */
+    fun fitted(): Size {
+        val img = image ?: return Size(size.width.toFloat(), size.height.toFloat())
+        val f = min(size.width / img.width.toFloat(), size.height / img.height.toFloat())
+        return Size(img.width * f, img.height * f)
+    }
+
     fun clamp(o: Offset, s: Float): Offset {
-        val mx = size.width * (s - 1f) / 2f
-        val my = size.height * (s - 1f) / 2f
+        val fit = fitted()
+        val mx = max(0f, (fit.width * s - size.width) / 2f)
+        val my = max(0f, (fit.height * s - size.height) / 2f)
         return Offset(o.x.coerceIn(-mx, mx), o.y.coerceIn(-my, my))
     }
 
@@ -111,8 +132,10 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
     }
 
     val ctx = LocalContext.current
-    val request = remember(path) {
-        ImageRequest.Builder(ctx).data(File(path)).size(VIEWER_MAX_SIDE).build()
+    LaunchedEffect(path) {
+        val req = ImageRequest.Builder(ctx).data(File(path)).size(VIEWER_MAX_SIDE).build()
+        val d = (ctx.imageLoader.execute(req) as? SuccessResult)?.drawable
+        image = (d as? BitmapDrawable)?.bitmap?.asImageBitmap()
     }
     Box(
         Modifier.fillMaxSize()
@@ -140,14 +163,34 @@ private fun ZoomableImage(path: String, active: Boolean, onZoomed: (Boolean) -> 
                 }
             },
     ) {
-        AsyncImage(
-            model = request, contentDescription = null, contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationX = offset.x
-                translationY = offset.y
-            },
-        )
+        val img = image
+        if (img == null) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+        } else {
+            // Only the visible part of the bitmap is drawn, at screen size: no huge scaled layer,
+            // which some GPUs render black at high zoom.
+            Canvas(Modifier.fillMaxSize()) {
+                val fit = fitted()
+                val k = fit.width * scale / img.width
+                val x0 = (size.width - fit.width * scale) / 2f + offset.x
+                val y0 = (size.height - fit.height * scale) / 2f + offset.y
+                val left = max(0f, x0)
+                val top = max(0f, y0)
+                val right = min(size.width.toFloat(), x0 + fit.width * scale)
+                val bottom = min(size.height.toFloat(), y0 + fit.height * scale)
+                if (right <= left || bottom <= top) return@Canvas
+                val sx = ((left - x0) / k).toInt().coerceIn(0, img.width - 1)
+                val sy = ((top - y0) / k).toInt().coerceIn(0, img.height - 1)
+                val sw = ((right - left) / k).roundToInt().coerceIn(1, img.width - sx)
+                val sh = ((bottom - top) / k).roundToInt().coerceIn(1, img.height - sy)
+                drawImage(
+                    img,
+                    srcOffset = IntOffset(sx, sy), srcSize = IntSize(sw, sh),
+                    dstOffset = IntOffset((x0 + sx * k).roundToInt(), (y0 + sy * k).roundToInt()),
+                    dstSize = IntSize((sw * k).roundToInt(), (sh * k).roundToInt()),
+                    filterQuality = FilterQuality.High,
+                )
+            }
+        }
     }
 }
