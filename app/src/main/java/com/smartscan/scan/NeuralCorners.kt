@@ -36,9 +36,10 @@ object NeuralCorners {
     private var totalMs = 0L
     /** Heatmap peak of each corner in the last [detect] call (diagnostics). */
     val lastPeaks = FloatArray(4)
-    /** Input padding (fraction of the frame on each side) and how it is filled; tuned with [CornerDebug]. */
+    /** Input padding (fraction of the frame on each side) and how it is filled. Tuned with [CornerDebug] on real
+     * photos: no padding missed pages filling the frame (peaks ~0), 12% replicated border gave 0.8-0.95. */
     var padding = 0.12f
-    var borderType = org.opencv.core.Core.BORDER_CONSTANT
+    var borderType = org.opencv.core.Core.BORDER_REPLICATE
     var borderFill = 128.0
 
     val ready: Boolean get() = session != null

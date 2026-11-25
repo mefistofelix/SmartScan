@@ -24,7 +24,11 @@ import java.util.concurrent.Executors
  * [process] is called on the analyzer thread only; [release] when the scanner closes.
  */
 class LiveCornerDetector {
-    private val modelExec = Executors.newSingleThreadExecutor()
+    // Background priority: the model must never steal the CPU from the preview and the UI.
+    private val modelExec = Executors.newSingleThreadExecutor { r ->
+        Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() }, "corner-model")
+    }
+    private var lastLaunch = 0L
     @Volatile private var busy = false
     private val lock = Any()
     /** Finished model result (normalized corners or null = no document) and the small gray of its frame. */
@@ -52,8 +56,10 @@ class LiveCornerDetector {
             corners?.let { c -> prev?.let { p -> track(p, small, c) } }
         }
 
-        if (!busy && !released) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!busy && !released && now - lastLaunch >= MIN_MODEL_INTERVAL_MS) {
             busy = true
+            lastLaunch = now
             val b = bgr.clone()
             val g = small.clone()
             modelExec.execute {
@@ -125,5 +131,7 @@ class LiveCornerDetector {
     private companion object {
         /** Width of the gray frame used for optical flow. */
         const val TRACK_WIDTH = 320.0
+        /** At most ~4 model runs per second; optical flow covers the frames in between. */
+        const val MIN_MODEL_INTERVAL_MS = 250L
     }
 }
