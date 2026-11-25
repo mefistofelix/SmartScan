@@ -186,7 +186,7 @@ fun ReviewScreen(
     val doc by vm.doc.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
-    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it, pages.map { p -> p.note }) { viewing = null } }
+    viewing?.let { PageViewer(pages, it) { viewing = null } }
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val endpoints by vm.endpoints.collectAsStateWithLifecycle()
     val nodeIds by vm.nodeIds.collectAsStateWithLifecycle()

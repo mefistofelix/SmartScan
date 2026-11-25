@@ -272,6 +272,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private suspend fun newDraft(): Long = c.repo.createDraft().also { settings.scannerDraftId = it }
 
+    /** Notes may change in the page viewer: reload them from the pages. */
+    fun refreshNotes() = viewModelScope.launch { docIdFlow.value?.let { restoreNotes(it) } }
+
     /** Notes of a resumed document, so they can still be listed and deleted. */
     private suspend fun restoreNotes(id: Long) {
         val doc = c.repo.getDoc(id) ?: return
@@ -811,7 +814,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
     val pages by vm.pages.collectAsStateWithLifecycle()
     var viewing by remember { mutableStateOf<Int?>(null) }
     SideEffect { vm.viewerOpen = viewing != null }
-    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it, pages.map { p -> p.note }) { viewing = null } }
+    viewing?.let { PageViewer(pages, it) { viewing = null; vm.refreshNotes() } }
     val partial by vm.voicePartial.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
     val view = LocalView.current

@@ -56,6 +56,32 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import coil.imageLoader
 import coil.request.SuccessResult
+import android.Manifest
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.core.content.ContextCompat
+import com.smartscan.container
+import com.smartscan.data.PageEntity
+import com.smartscan.voice.VoiceController
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min
@@ -67,44 +93,125 @@ private const val MAX_ZOOM = 8f
 
 /**
  * Full-screen page viewer: swipe between pages, pinch or double tap to zoom, drag to pan.
- * Pages are decoded near full resolution so the scan quality can be checked.
+ * Pages are decoded near full resolution so the scan quality can be checked. The bottom bar dictates a
+ * voice note for the page, lists its notes (each one deletable) and deletes the page.
  */
 @Composable
-fun PageViewer(paths: List<String>, start: Int, notes: List<String> = emptyList(), onDismiss: () -> Unit) {
-    if (paths.isEmpty()) return
+fun PageViewer(pages: List<PageEntity>, start: Int, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val app = context.applicationContext as android.app.Application
+    val repo = app.container.repo
+    val scope = rememberCoroutineScope()
+    val voice = remember { VoiceController(app, app.container.settings.voiceLanguage) }
+    DisposableEffect(Unit) { onDispose { voice.destroy() } }
+    val listening by voice.listening.collectAsState()
+    val partial by voice.partial.collectAsState()
+    var confirmDelete by remember { mutableStateOf<PageEntity?>(null) }
+    LaunchedEffect(pages.isEmpty()) { if (pages.isEmpty()) onDismiss() }
+    if (pages.isEmpty()) return
+
+    fun dictate(p: PageEntity) {
+        if (listening) { voice.stop(); return }
+        voice.listenOnce { text ->
+            if (text.isNullOrBlank()) {
+                Toast.makeText(context, str(R.string.voice_not_understood), Toast.LENGTH_SHORT).show()
+            } else scope.launch {
+                repo.appendNote(p.docId, text, p.id)
+                Toast.makeText(context, str(R.string.note_added), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    var pendingDictation by remember { mutableStateOf<PageEntity?>(null) }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        pendingDictation?.let { if (ok) dictate(it) }
+        pendingDictation = null
+    }
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { voice.stop(); onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        val pager = rememberPagerState(initialPage = start.coerceIn(0, paths.lastIndex)) { paths.size }
+        val pager = rememberPagerState(initialPage = start.coerceIn(0, pages.lastIndex)) { pages.size }
         var zoomed by remember { mutableStateOf(false) }
+        val current = pages.getOrNull(pager.currentPage.coerceAtMost(pages.lastIndex))
         Box(Modifier.fillMaxSize().background(Color.Black)) {
-            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, key = { paths[it] }) { i ->
-                ZoomableImage(paths[i], active = i == pager.currentPage) { zoomed = it }
+            HorizontalPager(pager, Modifier.fillMaxSize(), userScrollEnabled = !zoomed, key = { pages.getOrNull(it)?.id ?: it }) { i ->
+                pages.getOrNull(i)?.let { p -> ZoomableImage(p.processedPath, active = i == pager.currentPage) { zoomed = it } }
             }
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(50))
-                        .background(Color(0x99000000)),
-                ) { Icon(Icons.Filled.Close, str(R.string.close), tint = Color.White) }
-                notes.getOrNull(pager.currentPage)?.takeIf { it.isNotBlank() }?.let { n ->
-                    Text(
-                        n, color = Color.White, style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 56.dp)
-                            .clip(RoundedCornerShape(8.dp)).background(Color(0x99000000))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-                if (paths.size > 1) Text(
-                    "${pager.currentPage + 1} / ${paths.size}",
+                Text(
+                    "${pager.currentPage + 1} / ${pages.size}",
                     color = Color.White, style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
                         .clip(RoundedCornerShape(50)).background(Color(0x99000000))
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
+                IconButton(
+                    onClick = { voice.stop(); onDismiss() },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(50))
+                        .background(Color(0x99000000)),
+                ) { Icon(Icons.Filled.Close, str(R.string.close), tint = Color.White) }
+                if (current != null) Column(
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    val lines = current.note.split("\n").filter { it.isNotBlank() }
+                    Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        lines.forEach { line ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xAA000000))
+                                    .padding(start = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(line, color = Color.White, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        repo.removeNote(current.docId, line, current.id)
+                                        Toast.makeText(context, str(R.string.note_deleted), Toast.LENGTH_SHORT).show()
+                                    }
+                                }) { Icon(Icons.Filled.Close, str(R.string.delete), tint = Color.White) }
+                            }
+                        }
+                    }
+                    if (listening) Text(
+                        "🎙 " + partial.ifBlank { str(R.string.page_note) + "…" }, color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xAA000000)).padding(8.dp),
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        if (voice.available) ViewerAction(
+                            Icons.Filled.Mic, str(R.string.add_note), if (listening) MaterialTheme.colorScheme.tertiary else Color.White,
+                        ) {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) dictate(current)
+                            else { pendingDictation = current; micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                        }
+                        ViewerAction(Icons.Filled.Delete, str(R.string.delete_page), Color.White) { confirmDelete = current }
+                    }
+                }
             }
         }
+        confirmDelete?.let { p ->
+            AlertDialog(
+                onDismissRequest = { confirmDelete = null },
+                title = { Text(str(R.string.delete_page_q)) },
+                confirmButton = {
+                    TextButton(onClick = { confirmDelete = null; scope.launch { repo.deletePage(p) } }) { Text(str(R.string.delete)) }
+                },
+                dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(str(R.string.cancel)) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerAction(icon: ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xAA000000)).clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, null, tint = tint)
+        Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
 }
 

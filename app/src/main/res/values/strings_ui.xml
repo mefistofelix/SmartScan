@@ -247,4 +247,6 @@
     <string name="add_pages">Add pages</string>
     <string name="resumed_pages">%1$d unsaved pages: go on scanning or tap Done</string>
     <string name="pages_hint">Tap to view, long press and drag to reorder</string>
+    <string name="add_note">Voice note</string>
+    <string name="delete_page_q">Delete this page?</string>
 </resources>
