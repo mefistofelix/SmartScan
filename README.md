@@ -1,48 +1,50 @@
 # SmartScan
 
-Scanner di documenti per Android in stile «Genius Scan», pensato per l'uso a una mano e senza tastiera.
+Document scanner for Android, built for one-handed use without a keyboard.
 
 [![Android CI](../../actions/workflows/android.yml/badge.svg)](../../actions/workflows/android.yml)
 
-L'APK si scarica dalla pagina **Releases** (build di debug firmata con la chiave di debug della CI).
+Download the APK from the **Releases** page. It is a debug build signed with the fixed CI debug key, so every release installs over the previous one.
 
-## Funzioni
+The interface is in English, with an Italian translation that is used automatically on phones set to Italian.
 
-| Area | Cosa fa |
+## Features
+
+| Area | What it does |
 |---|---|
-| **Acquisizione** | CameraX a pieno schermo, rilevamento degli angoli in tempo reale con una **rete neurale** (DocAligner, funziona anche su sfondi pieni di disegni e con oggetti sopra il foglio; OpenCV come riserva), **scatto automatico** quando il foglio è fermo e a fuoco, **attesa automatica della pagina successiva** (rileva il cambio di scena), flash, tap-to-focus, **tasti volume come otturatore**. |
-| **Flusso continuo** | L'app si apre direttamente in fotocamera (disattivabile nelle impostazioni). Un'icona passa dall'anteprima a schermo pieno (più bella, ma sui telefoni lunghi nasconde circa il 40% della larghezza scattata) a quella del fotogramma intero, centrata. Nessuna modalità da scegliere: scatti le pagine, in basso a sinistra vedi l'anteprima con il numero di pagine (tocco = elenco con eliminazione), in basso a destra scegli **PDF / IMG** (predefinito PDF) e premi **Fine**. Il documento va in archivio, OCR e upload partono in background e la fotocamera resta pronta per il documento successivo. Chiudendo la fotocamera le pagine in sospeso vengono salvate. |
-| **Comandi rapidi** | Icone in alto nella fotocamera, un tocco ciascuno (la scelta resta per le volte successive, un avviso spiega cosa è cambiato): **rilevamento** a tre stati in un solo pulsante (Auto: bordi e scatto automatico → Bordi: bordi e raddrizzamento, scatti tu → Spento: pagina intera così com'è), **HQ** (qualità massima: risoluzione piena del sensore, compressione minima, nessun ridimensionamento in esportazione), **GPS** (salva la posizione con ogni pagina), **luce**, e, solo se c'è almeno uno storage con invio automatico, **invio agli storage** (spento: a «Fine» il documento resta solo locale; si può sempre inviare a mano dalla sua scheda). Tieni premuta un'icona per vederne il nome. La **luce** è una torcia: se attiva resta sempre accesa, non lampeggia allo scatto. L'icona cartella in alto a sinistra salva e apre l'elenco dei documenti; dall'elenco, il tasto indietro torna alla fotocamera. |
-| **Note vocali** | Pulsante nota in basso a sinistra: detti una nota per il documento in corso, anche più volte. Ogni nota si aggiunge alle note del documento e a quelle dell'ultima pagina scattata. Finché il documento non è salvato, il numero sul pulsante (o la pressione lunga) mostra le note, ognuna eliminabile; l'elenco si chiude da solo dopo qualche secondo. Se il documento non ha ancora un titolo, le prime parole della prima nota diventano il nome (modificabile: tocca il titolo nella scheda del documento). Senza note il nome è automatico («Scansione data ora»). |
-| **QR e codici a barre** | Durante l'OCR ogni pagina viene letta anche per QR code e codici a barre (tutti i formati, anche più di uno per pagina). I valori decodificati finiscono nei metadati. |
-| **Metadati nei file** | PDF: titolo, note (Subject), categorie e tag (Keywords), codici e posizione nel dizionario Info, e su ogni pagina una nota (annotazione non stampata) con nota vocale, codici e posizione della pagina. Immagini: EXIF (descrizione, commento, GPS) e XMP con il testo completo (titolo, note, tag, nota e codici della pagina). |
-| **Elaborazione** | Correzione prospettica, **raddrizzamento automatico** (deskew sulle righe di testo), editor manuale dei 4 angoli con lente d'ingrandimento, **espansione / restringimento dei bordi**, «pagina intera», rotazione, riordino ed eliminazione pagine. |
-| **Filtri** | Originale, Migliorato (rimozione ombre e normalizzazione dell'illuminazione solo sulla luminosità: i colori restano quelli reali), Grigi, Bianco/nero (soglia adattiva, salvato a 1 bit). |
-| **OCR** | ML Kit on-device (offline), in background con WorkManager. Testo ricercabile nell'archivio. |
-| **Esportazione** | PDF, **PDF ricercabile** (livello di testo OCR invisibile), JPEG/PNG, TXT. Scrittore PDF proprio: i JPEG vengono inseriti senza ricodifica e il B/N come immagine a 1 bit compressa Flate, quindi file piccoli. Qualità Alta/Media/Compatta e pagina Auto/A4/Letter. Condivisione o «Salva come…». |
-| **Archivio** | Locale (Room + file privati dell'app), ricerca su titolo, note, testo OCR e tag (anche **a voce**: microfono nella casella di ricerca, la X la azzera); filtro per ramo dell'albero delle categorie. Tieni premuto un documento per la **selezione multipla**: condividi tutti i selezionati in **un unico ZIP**, **eliminali** oppure **riordina** l'elenco trascinando la maniglia a sinistra di ogni documento (ogni documento nel suo formato: PDF ricercabile o cartella di immagini). |
-| **Categorie e tag** | Due alberi di profondità arbitraria (categorie, tag/etichette), assegnazione multipla per documento. Alberi locali modificabili e **alberi remoti** scaricati dagli endpoint (sola lettura, unione con id stabili). |
-| **Endpoint di storage** | Aggiunta da **QR code** (o link `smartscan://add?cfg=…`) con conferma esplicita dell'host. HTTP multipart o WebDAV. **Upload in background** con nuovi tentativi, vincolo «solo Wi-Fi», invio automatico o manuale. |
-| **Voce** | Solo dettatura, niente comandi vocali. Dettatura dei metadati **prima** (all'apertura della fotocamera), **durante** o **dopo** (a «Fine», prima del salvataggio). Dopo «Fine» la fotocamera è subito pronta, senza schermate in mezzo. |
+| **Capture** | Camera preview with real-time corner detection by a **neural network** (DocAligner). It also works on busy, colorful backgrounds and with objects lying on the page; OpenCV is the fallback while the model loads. **Automatic capture** when the page is still and in focus, **waits for the next page** (notices the scene change), tap to focus, **volume keys as shutter**. |
+| **Continuous flow** | The app opens straight into the camera (can be turned off in Settings). No modes to pick: shoot the pages; bottom left shows the last page and the page count (tap = list with delete); bottom right picks **PDF / IMG** (default PDF) and **Done**. The document goes to the archive, OCR and uploads run in the background, and the camera is ready for the next document right away. Closing the camera saves pending pages. |
+| **Quick toggles** | Icons at the top of the camera, one tap each, remembered for next time (a short notice says what changed; long press shows the name): **detection** as one three-state button (Auto: edges and automatic capture → Edges: edges and deskew, you shoot → Off: whole frame as it is), **preview** full screen (nicer, but a tall screen hides about 40% of the captured width) or whole frame, **HQ** (full sensor resolution, low compression, no downscaling on export), **GPS** (location saved with every page), **light** (a torch: it stays on, it does not flash at capture; it is restored when the app returns to the foreground), and, only when an endpoint with automatic upload exists, **send to storage** (off: the document stays local at Done; it can still be sent from its page). The folder icon opens the document list; Back from the list returns to the camera. |
+| **Voice notes** | Note button at the bottom left: dictate a note for the current document, as many times as needed. Each note is added to the document notes and to the last captured page. Until the document is saved, the badge (or a long press) lists the notes, each one deletable; the list closes by itself. If the document has no title yet, the first words of the first note become its name (tap the title on the document page to rename). Without notes the name is automatic («Scan date time»). |
+| **QR codes and barcodes** | During OCR every page is also read for QR codes and barcodes (all formats, more than one per page). The decoded values go into the metadata. |
+| **File metadata** | PDF: title, notes (Subject), categories and tags (Keywords), codes and location in the Info dictionary, plus a non-printing note on every page with that page's voice note, codes and location. Images: EXIF (description, comment, GPS) and XMP with the full text (title, notes, tags, page note and codes). |
+| **Processing** | Perspective correction, **automatic deskew** (on text lines), manual 4-corner editor with magnifier, **edge expand / shrink**, «full page», rotation, page reorder and delete. |
+| **Filters** | Original, Enhanced (shadow removal and illumination normalization on lightness only, so colors stay true), Grayscale, Black and white (adaptive threshold, stored as 1 bit). |
+| **OCR** | ML Kit on device (offline), in the background with WorkManager. Searchable from the archive. |
+| **Export** | PDF, **searchable PDF** (invisible OCR text layer), JPEG/PNG, TXT. Own PDF writer: JPEGs are embedded without re-encoding and B/W pages as 1-bit Flate images, so files stay small. High/Medium/Compact quality and Auto/A4/Letter page size. Share or «Save as…». |
+| **Archive** | Local (Room plus app-private files). Search on title, notes, OCR text and tags, also **by voice** (microphone inside the search box, X clears it); filter by a branch of the category tree. Long press a document for **multi-select**: share all selected documents as **one ZIP** (each in its own format: searchable PDF or a folder of images), **delete** them, or **reorder** the list by dragging the handle next to each document. |
+| **Categories and tags** | Two trees of any depth (categories, tags), several per document. Local trees are editable; **remote trees** come from the endpoints (read-only, merged by stable ids). |
+| **Storage endpoints** | Added from a **QR code** (or a `smartscan://add?cfg=…` link) with an explicit host confirmation. HTTP multipart or WebDAV. **Background upload** with retries, «Wi-Fi only» option, automatic or manual sending. |
+| **Voice** | Dictation only, no voice commands. Metadata can be dictated **before** (when the camera opens), **during** or **after** (at Done, before saving) a document. After Done the camera is ready again, with no screen in between. Swear words are not masked. |
 
-### Metadati a voce
+### Voice metadata
 
-Parole chiave: `titolo`, `categoria`, `tag`/`etichetta`, `nota`, `data`. Esempio:
+The dictation parser understands Italian keywords: `titolo` (title), `categoria` (category), `tag`/`etichetta`, `nota` (note), `data` (date). Example:
 
 > «titolo fattura Enel categoria bollette tag urgente e casa nota pagare entro venerdì data 12 marzo 2025»
 
-Le categorie e i tag vengono abbinati in modo approssimato (accenti, piccoli errori di riconoscimento) agli alberi locali e remoti. I tag sconosciuti possono essere creati al volo. Senza parole chiave, i nomi di tag/categorie riconosciuti vengono assegnati e il resto della frase diventa il titolo.
+Categories and tags are matched loosely (accents, small recognition errors) against the local and remote trees. Unknown tags can be created on the fly. Without keywords, recognized tag/category names are assigned and the rest of the sentence becomes the title.
 
-## Protocollo degli endpoint
+## Endpoint protocol
 
-### QR di configurazione
+### Configuration QR
 
-Il QR contiene questo JSON (oppure `smartscan://add?cfg=<JSON in base64url>`):
+The QR holds this JSON (or `smartscan://add?cfg=<base64url JSON>`):
 
 ```json
 {
   "v": 1,
-  "name": "Archivio ufficio",
+  "name": "Office archive",
   "type": "http",
   "url": "https://scan.example.com/api/upload",
   "headers": { "Authorization": "Bearer <token>" },
@@ -52,87 +54,88 @@ Il QR contiene questo JSON (oppure `smartscan://add?cfg=<JSON in base64url>`):
 }
 ```
 
-- `type`: `http` (POST multipart) oppure `webdav` (PUT nella cartella `url`).
-- `format`: `pdf`, `pdf_ocr`, `images`. Vale come predefinito dell'endpoint: la scelta PDF/IMG fatta in fotocamera per ogni documento ha la precedenza. Per i documenti PDF, `pdf` invia il PDF senza testo e gli altri valori il PDF ricercabile.
-- `headers`: inviati con ogni richiesta (upload e tassonomia).
+- `type`: `http` (multipart POST) or `webdav` (PUT into the `url` folder).
+- `format`: `pdf`, `pdf_ocr`, `images`. It is the endpoint default: the PDF/IMG choice made in the camera for each document wins. For PDF documents, `pdf` sends the PDF without text and the other values send the searchable PDF.
+- `headers`: sent with every request (upload and taxonomy).
 
-Il QR contiene un token: trattalo come una password.
+The QR contains a token: treat it like a password.
 
-### Upload HTTP
+### HTTP upload
 
-`POST url` con `multipart/form-data`:
+`POST url` with `multipart/form-data`:
 
-- `metadata`: JSON (vedi sotto)
-- `file`: uno o più file (PDF o immagini)
+- `metadata`: JSON (see below)
+- `file`: one or more files (PDF or images)
 
-Una risposta `2xx` conta come riuscita. Se il corpo è `{"id": "..."}`, l'id viene salvato come riferimento remoto. Su errori di rete, 408, 429 e 5xx l'app ritenta con backoff esponenziale. Gli altri 4xx sono errori definitivi. Ogni salvataggio di un documento già inviato lo reinvia: il server deve aggiornare il documento esistente usando `deviceDocId`.
+A `2xx` response counts as success. If the body is `{"id": "..."}`, the id is stored as the remote reference. On network errors, 408, 429 and 5xx the app retries with exponential backoff. Other 4xx are final errors. Saving a document that was already sent sends it again: the server must update the existing document using `deviceDocId`.
 
 ```json
 {
   "schema": "smartscan/1",
   "deviceDocId": 42,
-  "title": "Fattura Enel",
-  "notes": "pagare entro venerdì",
+  "title": "Electricity bill",
+  "notes": "pay by Friday",
   "date": "2025-03-12",
   "createdAt": "2025-03-14T09:12:00Z",
   "updatedAt": "2025-03-14T09:13:10Z",
   "pages": 2,
   "format": "pdf_ocr",
-  "categories": [{ "name": "Bollette", "path": "Casa/Bollette", "id": "c-12", "source": "endpoint" }],
-  "tags": [{ "name": "urgente", "path": "urgente", "source": "local" }],
-  "files": ["Fattura Enel_42.pdf"],
+  "categories": [{ "name": "Bills", "path": "Home/Bills", "id": "c-12", "source": "endpoint" }],
+  "tags": [{ "name": "urgent", "path": "urgent", "source": "local" }],
+  "files": ["Electricity bill_42.pdf"],
   "ocrText": "…",
   "pageInfo": [
-    { "page": 1, "note": "pagare entro venerdì", "lat": 45.4642, "lon": 9.19,
+    { "page": 1, "note": "pay by Friday", "lat": 45.4642, "lon": 9.19,
       "codes": [{ "format": "qr", "value": "https://example.com/f/123" }] },
     { "page": 2, "codes": [] }
   ]
 }
 ```
 
-`id` è presente solo per le voci che provengono dalla tassonomia di **questo** endpoint. `pageInfo` (dalla 0.3) ha una voce per pagina: `note`, `lat`/`lon` (solo se il GPS era attivo) e `codes` (QR e codici a barre decodificati; `format` è `qr`, `ean13`, `code128`, `datamatrix`, `pdf417`, …). I server più vecchi possono ignorarlo.
+`id` is only present for entries that come from **this** endpoint's taxonomy. `pageInfo` (since 0.3) has one entry per page: `note`, `lat`/`lon` (only when GPS was on) and `codes` (decoded QR codes and barcodes; `format` is `qr`, `ean13`, `code128`, `datamatrix`, `pdf417`, …). Older servers can ignore it.
 
 ### WebDAV
 
-`PUT {url}/{file}` per ogni file e `PUT {url}/{nome}.json` con gli stessi metadati.
+`PUT {url}/{file}` for each file and `PUT {url}/{name}.json` with the same metadata.
 
-### Tassonomia remota
+### Remote taxonomy
 
-`GET taxonomy` → 
+`GET taxonomy` →
 
 ```json
 {
   "categories": [
-    { "id": "casa", "name": "Casa", "children": [ { "id": "c-12", "name": "Bollette" } ] }
+    { "id": "home", "name": "Home", "children": [ { "id": "c-12", "name": "Bills" } ] }
   ],
-  "tags": [ { "id": "t-1", "name": "urgente" } ]
+  "tags": [ { "id": "t-1", "name": "urgent" } ]
 }
 ```
 
-Gli `id` devono restare stabili, così le assegnazioni sopravvivono alle sincronizzazioni. La sincronizzazione parte all'avvio dell'app, dopo l'aggiunta di un endpoint e manualmente.
+The `id`s must stay stable, so assignments survive synchronization. Sync runs when the app starts, after an endpoint is added, and on demand.
 
 ## Build
 
-Requisiti: JDK 17 e Android SDK 35 (oppure Android Studio, ultima versione).
+Requirements: JDK 17 and Android SDK 35 (or a recent Android Studio).
 
 ```bash
-gradle assembleDebug        # oppure: apri la cartella in Android Studio
+gradle assembleDebug        # or open the folder in Android Studio
 ```
 
-Il repository non include il Gradle wrapper jar. Android Studio usa `gradle/wrapper/gradle-wrapper.properties`, e la CI usa Gradle 8.11.1 tramite `gradle/actions/setup-gradle`. Per creare il wrapper in locale: `gradle wrapper`.
+The repository does not include the Gradle wrapper jar. Android Studio uses `gradle/wrapper/gradle-wrapper.properties`, and CI uses Gradle 8.11.1 through `gradle/actions/setup-gradle`. To create the wrapper locally: `gradle wrapper`.
 
-La CI ([.github/workflows/android.yml](.github/workflows/android.yml)) compila a ogni push e PR. Un tag `v*` pubblica una release con l'APK.
+CI ([.github/workflows/android.yml](.github/workflows/android.yml)) builds every push and PR. A `v*` tag publishes a release with the APK.
 
 ## Stack
 
-Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.14, ONNX Runtime 1.22 con il modello DocAligner LC100 ([DocsaidLab](https://github.com/DocsaidLab/DocAligner), Apache-2.0, licenza in `app/src/main/assets/licenses`), ML Kit Text Recognition e Barcode Scanning, Room, WorkManager, OkHttp, kotlinx.serialization, Coil. minSdk 26, targetSdk 35.
+Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.14, ONNX Runtime 1.22 with the DocAligner LC100 model ([DocsaidLab](https://github.com/DocsaidLab/DocAligner), Apache-2.0, license in `app/src/main/assets/licenses`), ML Kit Text Recognition and Barcode Scanning, Room, WorkManager, OkHttp, kotlinx.serialization, Coil. minSdk 26, targetSdk 35.
 
-## Stato e limiti noti
+## Status and known limits
 
-- Prima versione (0.1.x): compila in CI ma non è ancora stata provata su molti dispositivi. Le soglie di rilevamento e scatto automatico ([`AutoCaptureController`](app/src/main/java/com/smartscan/scan/AutoCaptureController.kt)) vanno tarate sul campo.
-- Le stringhe dell'interfaccia sono in italiano e scritte direttamente nel codice, non ancora in `strings.xml`.
-- L'APK contiene solo le librerie native `arm64-v8a` (quasi tutti i telefoni recenti). Per dispositivi 32 bit o emulatori x86 va tolto `abiFilters` da `app/build.gradle.kts`.
-- La release è una build di debug. Per una build firmata serve un keystore nei secrets della CI.
-- La dettatura usa il `SpeechRecognizer` di sistema. Su alcuni dispositivi emette un suono all'avvio dell'ascolto.
-- L'app è sempre in verticale e, mentre è aperta, lo schermo non va in standby.
-- Il traffico in chiaro (`http://`) è permesso per i server in LAN. L'app mostra un avviso per gli endpoint non https.
+- Tested mainly on one device (Samsung Galaxy A16). Detection and auto-capture thresholds ([`AutoCaptureController`](app/src/main/java/com/smartscan/scan/AutoCaptureController.kt)) may need tuning on other phones.
+- The APK only ships `arm64-v8a` native libraries (almost every recent phone). For 32-bit devices or x86 emulators, remove `abiFilters` from `app/build.gradle.kts`.
+- Releases are debug builds. A signed release build needs a keystore in the CI secrets.
+- Voice metadata keywords are Italian (see above); the recognition language is set in Settings.
+- Dictation uses the system `SpeechRecognizer`. Some devices play a sound when listening starts.
+- The app is portrait only, and the screen does not go to sleep while the app is in the foreground.
+- Samsung phones block the light when the battery is below about 15%; the app shows a notice.
+- Cleartext traffic (`http://`) is allowed for LAN servers. The app warns about endpoints that are not https.

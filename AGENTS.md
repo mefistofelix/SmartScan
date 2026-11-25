@@ -5,7 +5,10 @@ Guidance for coding agents working on this repository.
 ## Project
 
 SmartScan: single-module Android app (`:app`), Kotlin + Jetpack Compose, package `com.smartscan`.
-User-facing language is Italian. Keep UI strings in Italian.
+User-facing text lives in string resources: `res/values/strings_ui.xml` (English, default) and
+`res/values-it/strings_ui.xml` (Italian). Never hard-code UI text: add the key to both files and use
+`str(R.string.key, args)` (defined in `SmartScanApp.kt`, works in composables, ViewModels and enum labels).
+Code, comments and docs are in English. Voice metadata keywords (`voice/MetadataParser.kt`) are Italian.
 
 ## Build and verify
 
@@ -26,12 +29,13 @@ app/src/main/java/com/smartscan/
                        doc/{docId}, endpoints, qr, taxonomy, settings), volume-key shutter
   data/                Room entities/DAOs/DB, Repository, AppSettings (SharedPreferences)
   scan/                NeuralCorners (DocAligner ONNX model in assets, the main detector),
-                         scan/                OpenCV: DocumentDetector (edges, sharpness, scene signature),
+                       LiveCornerDetector (model on its own thread + optical flow between results),
+                       DocumentDetector (shape check, OpenCV fallback, sharpness, scene signature),
                        ImageProcessor (EXIF normalize, warp, deskew, filters), AutoCaptureController
   ocr/                 ML Kit OCR -> text + normalized line boxes
   export/              PdfWriter (hand-written PDF 1.4, invisible OCR layer), Exporter
   sync/                EndpointConfig (QR parsing), SyncManager (upload, taxonomy merge), OCR/Upload workers
-  voice/               VoiceController (SpeechRecognizer loop), VoiceCommands, MetadataParser
+  voice/               VoiceController (SpeechRecognizer), MetadataParser (dictation only, no voice commands in the UI)
   ui/                  Compose screens, one ViewModel per screen in the same file
 ```
 
@@ -53,17 +57,19 @@ app/src/main/java/com/smartscan/
   and read-only, and is merged by `(kind, remoteId)` in `SyncManager.merge`. Do not delete and
   re-insert remote nodes: that cascades away document assignments.
 - Document lifecycle: `DRAFT` (scanning/review) -> `PROCESSING` (saved; OCR queued) -> `READY`.
-- Scanner flow is continuous: no single/multi mode. «Fine» (`ScannerViewModel.finishDocument`) saves the draft
+- Scanner flow is continuous: no single/multi mode. «Done» (`ScannerViewModel.finishDocument`) saves the draft
   and scanning goes on into a new draft. Closing the scanner saves pending pages. `DocumentEntity.output`
   (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
 - Room schema changes need a `Migration` in `AppDatabase` (current version 5). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).
-- Scanner quick toggles (icons: detection tristate Auto/Bordi/Spento, HQ, GPS, torch) persist in `AppSettings`. HQ pages are recognized by their
-  original size (`ImageProcessor.isHighQuality`), so re-renders and exports keep the quality without a schema field.
-  The light is a torch (`enableTorch`, re-applied on camera open and after each capture), never the capture flash.
+- Scanner quick toggles (icons: detection tristate Auto / Edges / Off, preview mode, HQ, upload, GPS, torch) persist
+  in `AppSettings`. HQ pages are recognized by their original size (`ImageProcessor.isHighQuality`), so re-renders and exports keep the quality without a schema field.
+  The light is a torch (`enableTorch`, re-applied on camera open, after each capture and when the app returns to
+  the foreground), never the capture flash.
 - Per-page metadata (`PageEntity.note`, `lat`/`lon`, `codes`) is written into exports by `Exporter`
   (PDF Info + page annotation, EXIF + XMP) and into the upload JSON `pageInfo`. Codes are decoded with the OCR
   (`ocr/CodeReader`), and `Repository.rerender` resets them.
+- The app is portrait only (manifest) and keeps the screen on while in the foreground (`FLAG_KEEP_SCREEN_ON`).
 - The endpoint protocol (QR JSON, multipart fields, metadata schema `smartscan/1`, taxonomy JSON) is
   documented in README.md. If you change it, update README in the same change and keep it backward
   compatible (`ignoreUnknownKeys`).
@@ -75,5 +81,5 @@ app/src/main/java/com/smartscan/
 
 - Kotlin official code style, 4-space indent, trailing commas allowed.
 - Material 3 components. Opt in to experimental APIs locally with `@OptIn`.
-- Keep the ergonomics: primary actions sit in the bottom thumb zone, and every scanner action is
-  reachable by voice or volume key.
+- Keep the ergonomics: primary actions sit in the bottom thumb zone, the shutter is reachable by volume key,
+  and quick toggles stay one tap away as compact icons.
