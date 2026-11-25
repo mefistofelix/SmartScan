@@ -75,6 +75,8 @@ object DocumentDetector {
     private const val MIN_AREA = 0.10
     private const val MIN_SUPPORT = 0.55
     private const val MIN_ANGLE = 60.0
+    private const val REGION_TOL_GRAY = 30
+    private const val REGION_TOL_CHROMA = 12
     private const val MIN_OPPOSITE_RATIO = 0.5
 
     /** Below this chroma (|U-128| + |V-128|) a pixel counts as neutral: white / gray paper. */
@@ -120,24 +122,31 @@ object DocumentDetector {
             val frameArea = w.toDouble() * h
             val paper = chroma?.let { paperMask(small, it) }?.also { mats += it }
                 ?.takeIf { Core.countNonZero(it) >= frameArea * MIN_AREA }
-            if (paper != null) {
-                // The paper outline also counts as edge support.
+            // The document is normally in the middle of the frame: the region connected to the center with the
+            // same look (lightness and color) isolates it from light backgrounds, objects on it and textures.
+            val region = centerRegion(small, chroma)?.also { mats += it }
+                ?.takeIf { Core.countNonZero(it) >= frameArea * MIN_AREA }
+            for (m in listOfNotNull(paper, region)) {
+                // Mask outlines also count as edge support.
                 val grad = Mat().also { mats += it }
                 val gk = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
-                Imgproc.morphologyEx(paper, grad, Imgproc.MORPH_GRADIENT, gk)
+                Imgproc.morphologyEx(m, grad, Imgproc.MORPH_GRADIENT, gk)
                 gk.release()
                 Core.bitwise_or(support, grad, support)
             }
+            val fill = region ?: paper
             var best: Array<Point>? = null
             var bestScore = 0.0
-            for (src in listOfNotNull(paper, strong, weak, otsu)) {
-                for (q in candidates(src, frameArea)) {
+            for (src in listOfNotNull(region, paper, strong, weak, otsu)) {
+                val cands = candidates(src, frameArea).toMutableList()
+                if (src === region || src === paper) extremeQuad(src)?.let { cands += it }
+                for (q in cands) {
                     if (!plausible(q, w, h, frameArea)) continue
                     val s = support(q, support)
                     if (s < MIN_SUPPORT) continue
                     var score = abs(polyArea(q)) / frameArea * s * s * s
-                    if (paper != null) {
-                        val f = insideFraction(q, paper)
+                    if (fill != null) {
+                        val f = insideFraction(q, fill)
                         score *= f * f
                     }
                     if (score > bestScore) { bestScore = score; best = q }
@@ -148,6 +157,83 @@ object DocumentDetector {
             small.release()
             mats.forEach { it.release() }
         }
+    }
+
+    /**
+     * Pixels connected to the center of the frame that look like the center (lightness of [small], already
+     * closed so text is gone, and chroma when available). Caller releases; null when nothing usable.
+     */
+    private fun centerRegion(small: Mat, chroma: Mat?): Mat? {
+        val w = small.cols()
+        val h = small.rows()
+        val g = ByteArray(w * h)
+        small.get(0, 0, g)
+        val c = chroma?.let {
+            val ch = Mat()
+            Imgproc.resize(it, ch, small.size(), 0.0, 0.0, Imgproc.INTER_AREA)
+            Imgproc.blur(ch, ch, Size(5.0, 5.0))
+            ByteArray(w * h).also { b -> ch.get(0, 0, b); ch.release() }
+        }
+        val x0 = (w * 0.4).toInt(); val x1 = (w * 0.6).toInt()
+        val y0 = (h * 0.4).toInt(); val y1 = (h * 0.6).toInt()
+        val gs = ArrayList<Int>(); val cs = ArrayList<Int>()
+        for (y in y0 until y1) for (x in x0 until x1) {
+            val i = y * w + x
+            gs += g[i].toInt() and 0xFF
+            c?.let { cs += it[i].toInt() and 0xFF }
+        }
+        if (gs.isEmpty()) return null
+        val seedG = gs.sorted()[gs.size / 2]
+        val seedC = if (cs.isEmpty()) 0 else cs.sorted()[cs.size / 2]
+        val sim = ByteArray(w * h)
+        for (i in sim.indices) {
+            val dg = abs((g[i].toInt() and 0xFF) - seedG)
+            val dc = if (c == null) 0 else abs((c[i].toInt() and 0xFF) - seedC)
+            if (dg <= REGION_TOL_GRAY && dc <= REGION_TOL_CHROMA) sim[i] = -1
+        }
+        val mask = Mat(h, w, CvType.CV_8UC1)
+        mask.put(0, 0, sim)
+        val ko = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, ko)
+        ko.release()
+        // Keep the connected component that covers most of the central window.
+        val labels = Mat()
+        val n = Imgproc.connectedComponents(mask, labels, 4, CvType.CV_32S)
+        val lab = IntArray(w * h)
+        labels.get(0, 0, lab)
+        labels.release()
+        val counts = IntArray(n)
+        for (y in y0 until y1) for (x in x0 until x1) counts[lab[y * w + x]]++
+        val bestLabel = (1 until n).maxByOrNull { counts[it] } ?: 0
+        if (bestLabel == 0 || counts[bestLabel] < (x1 - x0) * (y1 - y0) / 4) { mask.release(); return null }
+        val out = ByteArray(w * h)
+        for (i in lab.indices) if (lab[i] == bestLabel) out[i] = -1
+        mask.put(0, 0, out)
+        val kc = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kc, Point(-1.0, -1.0), 2)
+        kc.release()
+        return mask
+    }
+
+    /**
+     * Corners of the largest blob of [bin] taken as the extreme hull points along the two diagonals.
+     * Works when the outline is too ragged (objects on the page, worn corners) for a polygon fit.
+     */
+    private fun extremeQuad(bin: Mat): Array<Point>? {
+        val contours = ArrayList<MatOfPoint>()
+        val hier = Mat()
+        Imgproc.findContours(bin, contours, hier, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+        hier.release()
+        val big = contours.maxByOrNull { Imgproc.contourArea(it) }
+        val pts = big?.toArray()
+        contours.forEach { it.release() }
+        if (pts == null || pts.size < 4) return null
+        val tl = pts.minBy { it.x + it.y }
+        val br = pts.maxBy { it.x + it.y }
+        val tr = pts.maxBy { it.x - it.y }
+        val bl = pts.minBy { it.x - it.y }
+        val q = arrayOf(tl, tr, br, bl)
+        return if (q.toSet().size == 4) q else null
     }
 
     /** Bright and neutral pixels of [small] (already closed: text removed), cleaned up. Caller releases. */
