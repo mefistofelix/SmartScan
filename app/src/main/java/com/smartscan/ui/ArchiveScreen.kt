@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FilterList
@@ -55,9 +58,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -130,6 +137,8 @@ class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleSelect(id: Long) = selected.update { if (id in it) it - id else it + id }
     fun selectAll() = selected.update { s -> items.value.map { it.row.doc.id }.toSet().let { all -> if (s == all) emptySet() else all } }
     fun clearSelection() { selected.value = emptySet() }
+
+    fun reorder(ids: List<Long>) = viewModelScope.launch { c.repo.reorderDocs(ids) }
 
     fun deleteSelected() {
         val ids = selected.value.toList()
@@ -244,14 +253,60 @@ fun ArchiveScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
-            } else LazyColumn(contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(items, key = { it.row.doc.id }) { item ->
-                    val id = item.row.doc.id
-                    DocCard(
-                        item, selected = id in selected,
-                        onClick = { if (selecting) vm.toggleSelect(id) else onOpen(id, item.row.doc.status == DocStatus.DRAFT) },
-                        onLongClick = { vm.toggleSelect(id) },
-                    )
+            } else {
+                // Drag to reorder (selection mode only): a local copy of the list is reordered while dragging and
+                // saved on release.
+                val listState = rememberLazyListState()
+                var dragList by remember { mutableStateOf<List<ArchiveItem>?>(null) }
+                var draggingId by remember { mutableStateOf<Long?>(null) }
+                var dragOffset by remember { mutableStateOf(0f) }
+                val currentItems by rememberUpdatedState(items)
+                val shown = dragList ?: items
+                fun endDrag() {
+                    dragList?.let { l -> vm.reorder(l.map { it.row.doc.id }) }
+                    draggingId = null; dragOffset = 0f
+                }
+                // Keep showing the dragged order until the database emits it (no flash back to the old order).
+                LaunchedEffect(items) { if (draggingId == null) dragList = null }
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(shown, key = { it.row.doc.id }) { item ->
+                        val id = item.row.doc.id
+                        val dragging = draggingId == id
+                        val handle = Modifier.pointerInput(id) {
+                            detectDragGestures(
+                                onDragStart = { dragList = currentItems; draggingId = id; dragOffset = 0f },
+                                onDragEnd = { endDrag() },
+                                onDragCancel = { endDrag() },
+                            ) { change, amount ->
+                                change.consume()
+                                dragOffset += amount.y
+                                val list = dragList ?: return@detectDragGestures
+                                val visible = listState.layoutInfo.visibleItemsInfo
+                                val me = visible.firstOrNull { it.key == id } ?: return@detectDragGestures
+                                val center = me.offset + me.size / 2 + dragOffset
+                                val target = visible.firstOrNull {
+                                    it.key != id && it.key is Long && center >= it.offset && center <= it.offset + it.size
+                                } ?: return@detectDragGestures
+                                val from = list.indexOfFirst { it.row.doc.id == id }
+                                val to = list.indexOfFirst { it.row.doc.id == target.key }
+                                if (from < 0 || to < 0) return@detectDragGestures
+                                dragList = list.toMutableList().apply { add(to, removeAt(from)) }
+                                dragOffset += me.offset - target.offset
+                            }
+                        }
+                        DocCard(
+                            item, selected = id in selected,
+                            onClick = { if (selecting) vm.toggleSelect(id) else onOpen(id, item.row.doc.status == DocStatus.DRAFT) },
+                            onLongClick = { vm.toggleSelect(id) },
+                            handle = if (selecting) handle else null,
+                            modifier = if (dragging) Modifier.zIndex(1f).graphicsLayer { translationY = dragOffset; shadowElevation = 16f }
+                            else Modifier,
+                        )
+                    }
                 }
             }
         }
@@ -274,14 +329,25 @@ fun ArchiveScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DocCard(item: ArchiveItem, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun DocCard(
+    item: ArchiveItem,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    handle: Modifier? = null,
+    modifier: Modifier = Modifier,
+) {
     val d = item.row.doc
     Card(
-        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
         colors = if (selected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         else CardDefaults.cardColors(),
     ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (handle != null) Icon(
+                Icons.Filled.DragHandle, "Trascina per riordinare",
+                modifier = handle.padding(end = 8.dp).size(28.dp),
+            )
             Box {
                 item.row.thumb?.let { Thumb(it, Modifier.size(56.dp, 74.dp)) }
                 if (selected) Icon(

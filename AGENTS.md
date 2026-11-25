@@ -52,7 +52,7 @@ app/src/main/java/com/smartscan/
 - Scanner flow is continuous: no single/multi mode. «Fine» (`ScannerViewModel.finishDocument`) saves the draft
   and scanning goes on into a new draft. Closing the scanner saves pending pages. `DocumentEntity.output`
   (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
-- Room schema changes need a `Migration` in `AppDatabase` (current version 3). Never use destructive migration.
+- Room schema changes need a `Migration` in `AppDatabase` (current version 4). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).
 - Scanner quick toggles (icons: detection tristate Auto/Bordi/Spento, HQ, GPS, torch) persist in `AppSettings`. HQ pages are recognized by their
   original size (`ImageProcessor.isHighQuality`), so re-renders and exports keep the quality without a schema field.

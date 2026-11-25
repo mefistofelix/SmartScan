@@ -42,6 +42,18 @@ class Repository(private val context: Context, val db: AppDatabase) {
         withContext(Dispatchers.IO) { File(context.filesDir, "docs/$id").deleteRecursively() }
     }
 
+    /**
+     * Applies a new archive order for [ids] (top first): their existing sort keys are redistributed, so the
+     * documents not in the list (filtered out) keep their place. Does not touch updatedAt.
+     */
+    suspend fun reorderDocs(ids: List<Long>) = db.withTransaction {
+        val keys = ids.mapNotNull { docs.get(it)?.sortKey }.sortedDescending()
+        if (keys.size != ids.size) return@withTransaction
+        // Equal keys would make the order ambiguous: spread them first.
+        val distinct = keys.mapIndexed { i, k -> k - i }
+        ids.forEachIndexed { i, id -> docs.setSortKey(id, distinct[i]) }
+    }
+
     suspend fun cleanupEmptyDrafts() = docs.emptyDraftIds().forEach { deleteDoc(it) }
 
     /** Marks the document as complete; OCR + uploads are then enqueued by SyncManager. */

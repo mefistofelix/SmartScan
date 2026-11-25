@@ -34,6 +34,8 @@ data class DocumentEntity(
     val status: DocStatus = DocStatus.DRAFT,
     val ocrText: String = "",
     val output: DocOutput = DocOutput.PDF,
+    /** Archive order, newest first (ORDER BY sortKey DESC). Starts as createdAt; reordering permutes keys. */
+    val sortKey: Long = System.currentTimeMillis(),
 )
 
 @Entity(

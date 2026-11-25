@@ -21,9 +21,11 @@ interface DocumentDao {
         """SELECT d.*,
            (SELECT p.processedPath FROM pages p WHERE p.docId = d.id ORDER BY p.position LIMIT 1) AS thumb,
            (SELECT COUNT(*) FROM pages p WHERE p.docId = d.id) AS pageCount
-           FROM documents d ORDER BY d.createdAt DESC"""
+           FROM documents d ORDER BY d.sortKey DESC, d.id DESC"""
     )
     fun observeList(): Flow<List<DocListRow>>
+
+    @Query("UPDATE documents SET sortKey = :key WHERE id = :id") suspend fun setSortKey(id: Long, key: Long)
 
     @Query("SELECT id FROM documents WHERE status = 'DRAFT' AND id NOT IN (SELECT docId FROM pages)")
     suspend fun emptyDraftIds(): List<Long>

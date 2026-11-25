@@ -838,20 +838,29 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp, start = 24.dp, end = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            val hint = when {
-                ui.notice != null -> ui.notice!!
+            // Only short-lived messages: notices (2.5 s), what is happening right now, and the "next page" hint
+            // for 3 s. Nothing stays on screen permanently.
+            val autoOn = ui.auto && ui.edges
+            val live = when {
+                ui.notice != null -> ui.notice
                 ui.saving -> "Salvo il documento…"
-                !ui.edges -> "Bordi spenti · scatta col pulsante o un tasto volume"
-                !ui.auto -> "Premi il pulsante o un tasto volume"
-                ui.phase == Phase.WAIT_NEXT -> "Pagina acquisita · metti la prossima"
-                ui.phase == Phase.STEADYING -> "Tieni fermo…"
-                ui.phase == Phase.CAPTURING -> "Scatto…"
-                else -> "Inquadra il documento"
+                autoOn && ui.phase == Phase.STEADYING -> "Tieni fermo…"
+                autoOn && ui.phase == Phase.CAPTURING -> "Scatto…"
+                else -> null
             }
-            Pill(hint + if (ui.processing > 0) "  ·  elaboro ${ui.processing}" else "")
+            val nextHint = if (autoOn && ui.phase == Phase.WAIT_NEXT) "Pagina acquisita · metti la prossima" else null
+            var showNext by remember { mutableStateOf(false) }
+            LaunchedEffect(nextHint) { showNext = nextHint != null; if (nextHint != null) { delay(3000); showNext = false } }
+            val line = listOfNotNull(
+                live ?: nextHint?.takeIf { showNext },
+                ui.processing.takeIf { it > 0 }?.let { "elaboro $it" },
+            ).joinToString("  ·  ")
+            if (line.isNotEmpty()) Pill(line)
             val heard = partial.ifBlank { ui.lastHeard }
             if (ui.voiceOn && heard.isNotBlank()) { Spacer(Modifier.size(6.dp)); Pill("🎙 $heard") }
-            ui.metaSummary?.let { Spacer(Modifier.size(6.dp)); Pill(it) }
+            var showMeta by remember { mutableStateOf(false) }
+            LaunchedEffect(ui.metaSummary) { showMeta = ui.metaSummary != null; if (showMeta) { delay(4000); showMeta = false } }
+            if (showMeta) ui.metaSummary?.let { Spacer(Modifier.size(6.dp)); Pill(it) }
         }
 
         ui.dictation?.let { kind ->
