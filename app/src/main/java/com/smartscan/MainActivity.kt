@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // No standby while the app is in the foreground (scanning sessions are hands-busy); the flag is per window,
+        // so it ends as soon as the app goes to the background.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (intent?.getBooleanExtra("debugCorners", false) == true) com.smartscan.scan.CornerDebug.run(applicationContext)
         handleIntent(intent)
         setContent { SmartScanTheme { AppNav() } }

@@ -14,8 +14,8 @@ android {
         applicationId = "com.smartscan"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.5.5"
+        versionCode = 28
+        versionName = "0.5.6"
         // arm64 only for now (covers virtually all current phones, e.g. Galaxy A16).
         // OpenCV ships native libs for 4 ABIs; dropping the others cuts the APK size by about 70%.
         ndk { abiFilters += "arm64-v8a" }

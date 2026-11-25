@@ -134,4 +134,5 @@ Kotlin, Jetpack Compose (Material 3), CameraX 1.4, OpenCV 4.14, ONNX Runtime 1.2
 - L'APK contiene solo le librerie native `arm64-v8a` (quasi tutti i telefoni recenti). Per dispositivi 32 bit o emulatori x86 va tolto `abiFilters` da `app/build.gradle.kts`.
 - La release è una build di debug. Per una build firmata serve un keystore nei secrets della CI.
 - La dettatura usa il `SpeechRecognizer` di sistema. Su alcuni dispositivi emette un suono all'avvio dell'ascolto.
+- L'app è sempre in verticale e, mentre è aperta, lo schermo non va in standby.
 - Il traffico in chiaro (`http://`) è permesso per i server in LAN. L'app mostra un avviso per gli endpoint non https.
