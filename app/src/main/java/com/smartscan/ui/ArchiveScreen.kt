@@ -1,9 +1,14 @@
 package com.smartscan.ui
 
 import android.app.Application
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -25,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
@@ -47,6 +53,7 @@ import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -78,6 +85,7 @@ import com.smartscan.data.DocStatus
 import com.smartscan.data.TaxonomyNode
 import com.smartscan.data.UploadEntity
 import com.smartscan.data.UploadStatus
+import com.smartscan.voice.VoiceController
 import com.smartscan.voice.normalizeText
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,6 +100,26 @@ data class ArchiveItem(val row: DocListRow, val nodes: List<TaxonomyNode>, val u
 class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
     private val c = app.container
     val query = MutableStateFlow("")
+
+    // ---- voice search: one dictation fills the query ----
+    private val voice = VoiceController(app, c.settings.voiceLanguage)
+    val voiceAvailable = voice.available
+    val voicePartial = voice.partial
+    val listening = MutableStateFlow(false)
+
+    fun voiceSearch() {
+        if (listening.value) { voice.stop(); listening.value = false; return }
+        listening.value = true
+        voice.listenOnce { text ->
+            listening.value = false
+            if (!text.isNullOrBlank()) query.value = text.trim()
+        }
+    }
+
+    override fun onCleared() {
+        voice.destroy()
+        super.onCleared()
+    }
     val filterNode = MutableStateFlow<Long?>(null)
     val nodes = c.repo.observeNodes().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val endpoints = c.repo.observeEndpoints().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -188,6 +216,12 @@ fun ArchiveScreen(
     val selected by vm.selected.collectAsStateWithLifecycle()
     val zipping by vm.zipping.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val listening by vm.listening.collectAsStateWithLifecycle()
+    val partial by vm.voicePartial.collectAsStateWithLifecycle()
+    fun micGranted() = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) vm.voiceSearch()
+    }
     val selecting = selected.isNotEmpty()
     var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.shares.collect { context.startActivity(it) } }
@@ -233,10 +267,24 @@ fun ArchiveScreen(
         Column(Modifier.padding(pad).fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = query, onValueChange = { vm.query.value = it },
-                    placeholder = { Text("Cerca titolo, testo, tag…") },
+                    value = if (listening) partial else query, onValueChange = { vm.query.value = it },
+                    placeholder = { Text(if (listening) "Parla…" else "Cerca titolo, testo, tag…") },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
-                    trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Filled.Close, "Pulisci") } },
+                    trailingIcon = {
+                        Row {
+                            if (query.isNotEmpty() && !listening) IconButton(onClick = { vm.query.value = "" }) {
+                                Icon(Icons.Filled.Close, "Azzera ricerca")
+                            }
+                            if (vm.voiceAvailable) IconButton(onClick = {
+                                if (micGranted()) vm.voiceSearch() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }) {
+                                Icon(
+                                    Icons.Filled.Mic, if (listening) "Interrompi" else "Cerca a voce",
+                                    tint = if (listening) MaterialTheme.colorScheme.error else LocalContentColor.current,
+                                )
+                            }
+                        }
+                    },
                     singleLine = true, modifier = Modifier.weight(1f),
                 )
             }

@@ -42,6 +42,9 @@ class AppSettings(context: Context) {
     /** Save the capture position with each page (EXIF GPS, PDF and upload metadata). */
     var geoTag: Boolean
         get() = bool("geoTag", false); set(v) = setBool("geoTag", v)
+    /** Scanner preview: full screen (true) or the whole 4:3 frame, centered (false). */
+    var fullPreview: Boolean
+        get() = bool("fullPreview", true); set(v) = setBool("fullPreview", v)
     /** Open the camera right away when the app starts (the archive stays below it). */
     var startInScanner: Boolean
         get() = bool("startInScanner", true); set(v) = setBool("startInScanner", v)

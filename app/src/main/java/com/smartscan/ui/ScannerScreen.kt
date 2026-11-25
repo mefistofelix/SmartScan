@@ -64,6 +64,8 @@ import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
@@ -157,6 +159,8 @@ data class ScannerUi(
     val edges: Boolean = true,
     val deskew: Boolean = true,
     val geo: Boolean = false,
+    /** Preview fills the screen (crops the sides) or shows the whole captured frame. */
+    val fullPreview: Boolean = true,
     /** Voice notes added to the current (not yet saved) document; each one can be deleted. */
     val notes: List<VoiceNote> = emptyList(),
     val showNotes: Boolean = false,
@@ -199,6 +203,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             auto = settings.autoCapture, hq = settings.maxQuality,
             edges = settings.edgeDetect, deskew = settings.edgeDetect && settings.autoDeskew,
             geo = settings.geoTag,
+            fullPreview = settings.fullPreview,
         )
     )
     val ui: StateFlow<ScannerUi> = _ui.asStateFlow()
@@ -508,6 +513,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         }
     }
 
+    fun togglePreview() {
+        val v = !_ui.value.fullPreview
+        settings.fullPreview = v
+        _ui.update { it.copy(fullPreview = v) }
+        notify(if (v) "Anteprima a schermo pieno (i lati sono tagliati)" else "Anteprima del fotogramma intero")
+    }
+
     fun toggleHq() {
         val v = !_ui.value.hq
         settings.maxQuality = v
@@ -769,14 +781,15 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         if (hasCamera) {
             val previewView = remember {
                 PreviewView(context).apply {
-                    // Whole 4:3 frame (what is captured), aligned to the top under the icons; on tall phones a
-                    // full-screen preview would hide about 40% of the width. Controls sit in the band below.
-                    scaleType = PreviewView.ScaleType.FIT_START
+                    scaleType = if (ui.fullPreview) PreviewView.ScaleType.FILL_CENTER else PreviewView.ScaleType.FIT_CENTER
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 }
             }
             LaunchedEffect(previewView) { vm.bindCamera(context, owner, previewView) }
-            AndroidView({ previewView }, Modifier.fillMaxSize())
+            // Full screen (nicer, but a tall screen hides ~40% of the 4:3 width) or the whole frame, centered.
+            AndroidView({ previewView }, Modifier.fillMaxSize()) {
+                it.scaleType = if (ui.fullPreview) PreviewView.ScaleType.FILL_CENTER else PreviewView.ScaleType.FIT_CENTER
+            }
             QuadOverlay(ui, Modifier.fillMaxSize().pointerInput(Unit) {
                 detectTapGestures { p -> vm.focusAt(previewView, p.x, p.y) }
             })
@@ -807,6 +820,11 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             Spacer(Modifier.weight(1f))
             // Quick toggles as icons (a notice explains each one when tapped); remembered for next sessions.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                ToggleIcon(
+                    if (ui.fullPreview) Icons.Filled.Fullscreen else Icons.Filled.FitScreen,
+                    if (ui.fullPreview) "Anteprima: schermo pieno" else "Anteprima: fotogramma intero",
+                    on = !ui.fullPreview,
+                ) { vm.togglePreview() }
                 ToggleIcon(Icons.Filled.HighQuality, "Qualità massima", ui.hq) { vm.toggleHq() }
                 // Tristate: Auto -> Bordi -> Spento
                 ToggleIcon(
@@ -1106,9 +1124,10 @@ private fun QuadOverlay(ui: ScannerUi, modifier: Modifier) {
         val q = ui.quad ?: return@Canvas
         val iw = ui.frameW.toFloat()
         val ih = ui.frameH.toFloat()
-        val s = min(size.width / iw, size.height / ih) // matches PreviewView FIT_START
-        val dx = 0f
-        val dy = 0f
+        // Same mapping as PreviewView: FILL_CENTER (full screen) or FIT_CENTER (whole frame).
+        val s = if (ui.fullPreview) max(size.width / iw, size.height / ih) else min(size.width / iw, size.height / ih)
+        val dx = (size.width - iw * s) / 2
+        val dy = (size.height - ih * s) / 2
         fun p(i: Int) = Offset(q[i * 2] * iw * s + dx, q[i * 2 + 1] * ih * s + dy)
         val path = Path().apply {
             moveTo(p(0).x, p(0).y); lineTo(p(1).x, p(1).y); lineTo(p(2).x, p(2).y); lineTo(p(3).x, p(3).y); close()
