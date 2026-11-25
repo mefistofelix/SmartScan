@@ -54,7 +54,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FlashlightOff
@@ -63,8 +68,6 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -187,7 +190,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private val _ui = MutableStateFlow(
         ScannerUi(
             auto = settings.autoCapture, hq = settings.maxQuality,
-            edges = settings.edgeDetect, deskew = settings.autoDeskew,
+            edges = settings.edgeDetect, deskew = settings.edgeDetect && settings.autoDeskew,
             geo = settings.geoTag,
         )
     )
@@ -475,6 +478,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         settings.autoCapture = v
         controller.reset()
         _ui.update { it.copy(auto = v, progress = 0f) }
+        notify(
+            when {
+                !_ui.value.edges -> "Lo scatto automatico richiede i bordi attivi"
+                v -> "Scatto automatico attivo"
+                else -> "Scatto automatico spento"
+            }
+        )
     }
 
     fun toggleTorch() {
@@ -493,18 +503,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     fun toggleEdges() {
         val v = !_ui.value.edges
+        // Edge detection and deskew go together: off = the whole frame as it is.
         settings.edgeDetect = v
+        settings.autoDeskew = v
         controller.reset()
         tracker.reset()
-        _ui.update { it.copy(edges = v, quad = null, progress = 0f) }
-        notify(if (v) "Rilevamento bordi attivo" else "Bordi spenti: pagina intera, scatto manuale")
-    }
-
-    fun toggleDeskew() {
-        val v = !_ui.value.deskew
-        settings.autoDeskew = v
-        _ui.update { it.copy(deskew = v) }
-        notify(if (v) "Raddrizzamento automatico attivo" else "Raddrizzamento automatico spento")
+        _ui.update { it.copy(edges = v, deskew = v, quad = null, progress = 0f) }
+        notify(if (v) "Bordi e raddrizzamento attivi" else "Bordi spenti: pagina intera così com'è, scatto manuale")
     }
 
     /** «GPS»: the position is saved with every page while on. Asks for the permission the first time. */
@@ -743,38 +748,30 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                 Icon(Icons.AutoMirrored.Filled.List, "Elenco documenti", tint = Color.White)
             }
             if (ui.savedCount > 0) Box(Modifier.clip(RoundedCornerShape(50)).clickable { vm.close() }) {
-                Pill("✓ ${ui.savedCount} salvati")
+                Pill("✓ ${ui.savedCount}")
             }
             Spacer(Modifier.weight(1f))
-            ScanChip("Auto", ui.auto) { vm.toggleAuto() }
-            IconButton(onClick = { vm.toggleTorch() }) {
-                Icon(
-                    if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, "Luce",
-                    tint = if (ui.torch) Color(0xFFFFD54F) else Color.White,
-                )
+            // Quick toggles as icons (a notice explains each one when tapped); remembered for next sessions.
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                ToggleIcon(Icons.Filled.AutoMode, "Scatto automatico", ui.auto && ui.edges) { vm.toggleAuto() }
+                ToggleIcon(Icons.Filled.HighQuality, "Qualità massima", ui.hq) { vm.toggleHq() }
+                ToggleIcon(Icons.Filled.Crop, "Bordi e raddrizzamento", ui.edges) { vm.toggleEdges() }
+                ToggleIcon(
+                    if (ui.geo) Icons.Filled.LocationOn else Icons.Filled.LocationOff, "Posizione GPS", ui.geo,
+                ) { vm.toggleGeo() }
+                ToggleIcon(
+                    if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, "Luce", ui.torch,
+                    activeColor = Color(0xFFFFB300),
+                ) { vm.toggleTorch() }
+                if (ui.voiceAvailable) ToggleIcon(
+                    if (ui.voiceOn) Icons.Filled.Mic else Icons.Filled.MicOff, "Comandi vocali", ui.voiceOn,
+                ) { vm.toggleVoice() }
             }
-            if (ui.voiceAvailable) IconButton(onClick = { vm.toggleVoice() }) {
-                Icon(
-                    if (ui.voiceOn) Icons.Filled.Mic else Icons.Filled.MicOff, "Comandi vocali",
-                    tint = if (ui.voiceOn) MaterialTheme.colorScheme.tertiary else Color.White
-                )
-            }
-        }
-
-        // Quick toggles: one tap each, remembered for the next sessions
-        Row(
-            Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 56.dp, end = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            ScanChip("HQ", ui.hq) { vm.toggleHq() }
-            ScanChip("Bordi", ui.edges) { vm.toggleEdges() }
-            ScanChip("Raddrizza", ui.deskew) { vm.toggleDeskew() }
-            ScanChip("GPS", ui.geo) { vm.toggleGeo() }
         }
 
         // Hints
         Column(
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 112.dp, start = 24.dp, end = 24.dp),
+            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp, start = 24.dp, end = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val hint = when {
@@ -944,16 +941,20 @@ private fun OutputToggle(output: DocOutput, onClick: () -> Unit) {
 }
 
 
+/** Compact round toggle for the scanner top bar: filled when on. */
 @Composable
-private fun ScanChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected, onClick = onClick, label = { Text(label) },
-        colors = FilterChipDefaults.filterChipColors(
-            labelColor = Color.White,
-            selectedContainerColor = MaterialTheme.colorScheme.primary,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-        ),
-    )
+private fun ToggleIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    on: Boolean,
+    activeColor: Color = MaterialTheme.colorScheme.primary,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).background(if (on) activeColor else Color(0x66000000))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable
