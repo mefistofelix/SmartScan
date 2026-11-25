@@ -99,8 +99,7 @@ class Exporter(
             subject = m.doc.notes,
             keywords = m.keywords.joinToString("; "),
             custom = buildMap {
-                if (m.allCodes.isNotEmpty()) put("SmartScanCodes", m.allCodes.joinToString("
-") { it.format + ": " + it.value })
+                if (m.allCodes.isNotEmpty()) put("SmartScanCodes", m.allCodes.joinToString("\n") { it.format + ": " + it.value })
                 if (first?.lat != null && first.lon != null) put("SmartScanGPS", PageMeta.coord(first.lat) + "," + PageMeta.coord(first.lon))
                 m.doc.docDate?.let { put("SmartScanDate", it) }
             },
@@ -114,14 +113,12 @@ class Exporter(
     private fun writeImageMeta(f: File, m: DocMeta, page: PageMeta) {
         runCatching {
             val exif = ExifInterface(f.absolutePath)
-            val desc = listOf(m.title, page.text()).filter { it.isNotBlank() }.joinToString("
-")
+            val desc = listOf(m.title, page.text()).filter { it.isNotBlank() }.joinToString("\n")
             exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, Xmp.ascii(desc))
             if (m.doc.notes.isNotBlank()) exif.setAttribute(ExifInterface.TAG_USER_COMMENT, Xmp.ascii(m.doc.notes))
             exif.setAttribute(ExifInterface.TAG_SOFTWARE, "SmartScan")
             if (page.lat != null && page.lon != null) exif.setLatLong(page.lat, page.lon)
-            val description = listOf(m.doc.notes, page.text()).filter { it.isNotBlank() }.joinToString("
-")
+            val description = listOf(m.doc.notes, page.text()).filter { it.isNotBlank() }.joinToString("\n")
             exif.setAttribute(ExifInterface.TAG_XMP, Xmp.build(m.title, description, m.keywords, page))
             exif.saveAttributes()
         }.onFailure { android.util.Log.w("Exporter", "metadata ${f.name}", it) }

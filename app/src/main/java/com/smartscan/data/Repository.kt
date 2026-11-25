@@ -171,8 +171,7 @@ class Repository(private val context: Context, val db: AppDatabase) {
         val t = text.trim().replaceFirstChar { it.uppercase() }
         if (t.isEmpty()) return doc
         pageId?.let { pagesDao.get(it) }?.let { p ->
-            pagesDao.update(p.copy(note = if (p.note.isBlank()) t else p.note + "
-" + t))
+            pagesDao.update(p.copy(note = if (p.note.isBlank()) t else p.note + "\n" + t))
         }
         val upd = doc.copy(
             title = doc.title.ifBlank { titleFrom(t) },
