@@ -77,7 +77,7 @@ fun AppNav() {
     NavHost(nav, startDestination = "archive") {
         composable("archive") {
             ArchiveScreen(
-                onScan = { nav.navigate("scanner/-1") },
+                onScan = { nav.navigate("scanner/-1") { launchSingleTop = true } },
                 onOpen = { id, draft -> nav.navigate(if (draft) "review/$id" else "doc/$id") },
                 onEndpoints = { nav.navigate("endpoints") },
                 onTaxonomy = { nav.navigate("taxonomy") },

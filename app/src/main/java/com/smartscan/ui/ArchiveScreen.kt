@@ -193,6 +193,8 @@ fun ArchiveScreen(
     LaunchedEffect(Unit) { vm.shares.collect { context.startActivity(it) } }
     LaunchedEffect(Unit) { vm.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     BackHandler(enabled = selecting) { vm.clearSelection() }
+    // System back from the document list goes back to scanning (the app is camera-first).
+    BackHandler(enabled = !selecting) { onScan() }
 
     Scaffold(
         topBar = {

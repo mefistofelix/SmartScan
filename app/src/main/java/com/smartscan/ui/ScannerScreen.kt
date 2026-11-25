@@ -55,7 +55,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
@@ -65,6 +64,7 @@ import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Mic
@@ -799,7 +799,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { vm.close() }) {
-                Icon(Icons.AutoMirrored.Filled.List, "Elenco documenti", tint = Color.White)
+                Icon(Icons.Filled.Folder, "Elenco documenti", tint = Color.White)
             }
             if (ui.savedCount > 0) Box(Modifier.clip(RoundedCornerShape(50)).clickable { vm.close() }) {
                 Pill("✓ ${ui.savedCount}")
