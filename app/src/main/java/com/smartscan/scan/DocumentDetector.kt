@@ -172,7 +172,7 @@ object DocumentDetector {
     private fun insideFraction(q: Array<Point>, mask: Mat): Double {
         val poly = Mat.zeros(mask.size(), CvType.CV_8UC1)
         val pts = MatOfPoint(*q.map { Point(Math.round(it.x).toDouble(), Math.round(it.y).toDouble()) }.toTypedArray())
-        Imgproc.fillPoly(poly, listOf(pts))
+        Imgproc.fillPoly(poly, listOf(pts), org.opencv.core.Scalar(255.0))
         val inside = Core.countNonZero(poly)
         Core.bitwise_and(poly, mask, poly)
         val paper = Core.countNonZero(poly)
