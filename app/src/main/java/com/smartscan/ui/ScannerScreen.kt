@@ -85,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -381,6 +382,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         camera?.cameraControl?.startFocusAndMetering(FocusMeteringAction.Builder(point).build())
     }
 
+    /** True while the full-screen page viewer is open: no automatic or volume-key shots behind it. */
+    @Volatile var viewerOpen = false
+
     private fun onAnalysis(q: FloatArray?, sharp: Double, sig: ByteArray, w: Int, h: Int) {
         lastSig = sig
         val s = tracker.update(q)
@@ -389,7 +393,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         _ui.update { it.copy(quad = s, frameW = w, frameH = h, phase = d.phase, progress = if (it.auto) d.progress else 0f) }
         if (d.capture) {
             val u = _ui.value
-            if (u.auto && u.dictation == null && !u.saving) viewModelScope.launch { capture(auto = true) }
+            if (u.auto && u.dictation == null && !u.saving && !viewerOpen) viewModelScope.launch { capture(auto = true) }
             else controller.reset()
         }
     }
@@ -767,6 +771,9 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
     val vm: ScannerViewModel = viewModel(key = "scanner_$docId") { ScannerViewModel(app, docId) }
     val ui by vm.ui.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
+    var viewing by remember { mutableStateOf<Int?>(null) }
+    SideEffect { vm.viewerOpen = viewing != null }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
     val partial by vm.voicePartial.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
     val view = LocalView.current
@@ -816,7 +823,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         HardwareKeys.shutterEnabled = true
         onDispose { HardwareKeys.shutterEnabled = false; sound.release() }
     }
-    LaunchedEffect(Unit) { HardwareKeys.events.collect { vm.capture() } }
+    LaunchedEffect(Unit) { HardwareKeys.events.collect { if (!vm.viewerOpen) vm.capture() } }
     BackHandler {
         when {
             ui.showNotes -> vm.toggleNotes()
@@ -957,7 +964,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
 
         // Bottom: page strip (optional) + controls in the thumb zone
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()) {
-            if (ui.showPages && pages.isNotEmpty()) PageStrip(pages) { vm.deletePage(it) }
+            if (ui.showPages && pages.isNotEmpty()) PageStrip(pages, onOpen = { viewing = it }) { vm.deletePage(it) }
             if (ui.showNotes && ui.notes.isNotEmpty()) NoteList(ui.notes, pages) { vm.deleteNote(it) }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
@@ -1067,7 +1074,7 @@ private fun PagesButton(pages: List<PageEntity>, processing: Int, onClick: () ->
 }
 
 @Composable
-private fun PageStrip(pages: List<PageEntity>, onDelete: (PageEntity) -> Unit) {
+private fun PageStrip(pages: List<PageEntity>, onOpen: (Int) -> Unit, onDelete: (PageEntity) -> Unit) {
     LazyRow(
         Modifier.fillMaxWidth().background(Color(0x99000000)).padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1078,7 +1085,7 @@ private fun PageStrip(pages: List<PageEntity>, onDelete: (PageEntity) -> Unit) {
                 AsyncImage(
                     model = File(p.processedPath), contentDescription = str(R.string.page_n, i + 1),
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).clickable { onOpen(i) }
                 )
                 Text(
                     "${i + 1}", color = Color.White, style = MaterialTheme.typography.labelSmall,

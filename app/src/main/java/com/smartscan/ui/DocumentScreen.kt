@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -141,6 +142,8 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
     val vm: DocumentViewModel = viewModel(key = "doc_$docId") { DocumentViewModel(app, docId) }
     val doc by vm.doc.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
+    var viewing by remember { mutableStateOf<Int?>(null) }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val nodeIds by vm.nodeIds.collectAsStateWithLifecycle()
     val uploads by vm.uploads.collectAsStateWithLifecycle()
@@ -190,7 +193,9 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
             }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(pages, key = { it.id }) { p -> Thumb(p.processedPath, Modifier.size(96.dp, 128.dp)) }
+                    itemsIndexed(pages, key = { _, p -> p.id }) { i, p ->
+                        Thumb(p.processedPath, Modifier.size(96.dp, 128.dp).clickable { viewing = i })
+                    }
                 }
                 Spacer(Modifier.height(16.dp))
             }

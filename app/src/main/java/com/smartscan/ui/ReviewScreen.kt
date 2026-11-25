@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,6 +182,8 @@ fun ReviewScreen(
     val vm: ReviewViewModel = viewModel(key = "review_$docId") { ReviewViewModel(app, docId) }
     val doc by vm.doc.collectAsStateWithLifecycle()
     val pages by vm.pages.collectAsStateWithLifecycle()
+    var viewing by remember { mutableStateOf<Int?>(null) }
+    viewing?.let { PageViewer(pages.map { p -> p.processedPath }, it) { viewing = null } }
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val endpoints by vm.endpoints.collectAsStateWithLifecycle()
     val nodeIds by vm.nodeIds.collectAsStateWithLifecycle()
@@ -230,7 +233,7 @@ fun ReviewScreen(
                         Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
                             if (p != null) AsyncImage(
                                 model = File(p.processedPath), contentDescription = str(R.string.page_n, i + 1),
-                                contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
+                                contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().clickable { viewing = i }
                             )
                             if (p != null && p.id in busy) CircularProgressIndicator()
                         }
