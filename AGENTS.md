@@ -54,7 +54,7 @@ app/src/main/java/com/smartscan/
   (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
 - Room schema changes need a `Migration` in `AppDatabase` (current version 3). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).
-- Scanner quick toggles (icons: auto, HQ, edges+deskew together, GPS, torch, voice) persist in `AppSettings`. HQ pages are recognized by their
+- Scanner quick toggles (icons: detection tristate Auto/Bordi/Spento, HQ, GPS, torch) persist in `AppSettings`. HQ pages are recognized by their
   original size (`ImageProcessor.isHighQuality`), so re-renders and exports keep the quality without a schema field.
   The light is a torch (`enableTorch`, re-applied on camera open and after each capture), never the capture flash.
 - Per-page metadata (`PageEntity.note`, `lat`/`lon`, `codes`) is written into exports by `Exporter`

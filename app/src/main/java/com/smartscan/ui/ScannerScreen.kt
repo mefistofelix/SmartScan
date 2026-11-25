@@ -59,6 +59,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
@@ -515,15 +516,30 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         if (!_ui.value.capturing) bindUseCases()
     }
 
-    fun toggleEdges() {
-        val v = !_ui.value.edges
-        // Edge detection and deskew go together: off = the whole frame as it is.
-        settings.edgeDetect = v
-        settings.autoDeskew = v
+    /**
+     * One button, three states: Auto (edges + automatic shutter) -> Bordi (edges + deskew, manual shutter)
+     * -> Spento (whole frame as it is, manual shutter) -> Auto.
+     */
+    fun cycleDetect() {
+        val u = _ui.value
+        val (edges, auto) = when {
+            u.edges && u.auto -> true to false
+            u.edges -> false to false
+            else -> true to true
+        }
+        settings.edgeDetect = edges
+        settings.autoDeskew = edges
+        settings.autoCapture = auto
         controller.reset()
         tracker.reset()
-        _ui.update { it.copy(edges = v, deskew = v, quad = null, progress = 0f) }
-        notify(if (v) "Bordi e raddrizzamento attivi" else "Bordi spenti: pagina intera così com'è, scatto manuale")
+        _ui.update { it.copy(edges = edges, deskew = edges, auto = auto, quad = null, progress = 0f) }
+        notify(
+            when {
+                auto -> "Auto: bordi e scatto automatico"
+                edges -> "Bordi: raddrizza, scatti tu"
+                else -> "Spento: pagina intera così com'è, scatti tu"
+            }
+        )
     }
 
     /** «GPS»: the position is saved with every page while on. Asks for the permission the first time. */
@@ -585,6 +601,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             if (wasOn) startCommands() else _ui.update { it.copy(voiceOn = false) }
         }
     }
+
+    fun hideNotes() = _ui.update { it.copy(showNotes = false) }
 
     fun toggleNotes() = _ui.update { it.copy(showNotes = !it.showNotes && it.notes.isNotEmpty(), showPages = false) }
 
@@ -705,6 +723,8 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         vm.onLocationPermission(res.values.any { it })
     }
     LaunchedEffect(Unit) { vm.resumeGeo() }
+    // The notes list closes by itself; deleting a note restarts the timer.
+    LaunchedEffect(ui.showNotes, ui.notes.size) { if (ui.showNotes) { delay(5000); vm.hideNotes() } }
     val audioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         vm.onAudioForNote(ok)
     }
@@ -787,9 +807,22 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             Spacer(Modifier.weight(1f))
             // Quick toggles as icons (a notice explains each one when tapped); remembered for next sessions.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                ToggleIcon(Icons.Filled.AutoMode, "Scatto automatico", ui.auto && ui.edges) { vm.toggleAuto() }
                 ToggleIcon(Icons.Filled.HighQuality, "Qualità massima", ui.hq) { vm.toggleHq() }
-                ToggleIcon(Icons.Filled.Crop, "Bordi e raddrizzamento", ui.edges) { vm.toggleEdges() }
+                // Tristate: Auto -> Bordi -> Spento
+                ToggleIcon(
+                    when {
+                        ui.edges && ui.auto -> Icons.Filled.AutoMode
+                        ui.edges -> Icons.Filled.Crop
+                        else -> Icons.Filled.CropFree
+                    },
+                    when {
+                        ui.edges && ui.auto -> "Rilevamento: Auto"
+                        ui.edges -> "Rilevamento: Bordi"
+                        else -> "Rilevamento: Spento"
+                    },
+                    on = ui.edges,
+                    activeColor = if (ui.auto) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                ) { vm.cycleDetect() }
                 ToggleIcon(
                     if (ui.geo) Icons.Filled.LocationOn else Icons.Filled.LocationOff, "Posizione GPS", ui.geo,
                 ) { vm.toggleGeo() }
