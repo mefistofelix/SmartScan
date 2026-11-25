@@ -497,6 +497,12 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         _ui.update { it.copy(torch = !it.torch) }
         torchRetries = 0
         applyTorch()
+        if (_ui.value.torch) {
+            // Samsung (and other) phones block the LED when the battery is low, without any error to the app.
+            val bm = getApplication<Application>().getSystemService(android.os.BatteryManager::class.java)
+            val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            if (level in 0..15) notify("Batteria al $level%: il telefono può bloccare la luce")
+        }
     }
 
     fun toggleHq() {
