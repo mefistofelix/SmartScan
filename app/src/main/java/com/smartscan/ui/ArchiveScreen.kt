@@ -27,12 +27,14 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -128,6 +131,16 @@ class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
     fun selectAll() = selected.update { s -> items.value.map { it.row.doc.id }.toSet().let { all -> if (s == all) emptySet() else all } }
     fun clearSelection() { selected.value = emptySet() }
 
+    fun deleteSelected() {
+        val ids = selected.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            ids.forEach { c.repo.deleteDoc(it) }
+            selected.value = emptySet()
+            messages.emit(if (ids.size == 1) "Documento eliminato" else "${ids.size} documenti eliminati")
+        }
+    }
+
     fun shareZip() {
         val ids = items.value.map { it.row.doc.id }.filter { it in selected.value }
         if (ids.isEmpty() || zipping.value) return
@@ -167,6 +180,7 @@ fun ArchiveScreen(
     val zipping by vm.zipping.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val selecting = selected.isNotEmpty()
+    var confirmDelete by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.shares.collect { context.startActivity(it) } }
     LaunchedEffect(Unit) { vm.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
     BackHandler(enabled = selecting) { vm.clearSelection() }
@@ -178,6 +192,7 @@ fun ArchiveScreen(
                 navigationIcon = { IconButton(onClick = { vm.clearSelection() }) { Icon(Icons.Filled.Close, "Annulla selezione") } },
                 actions = {
                     IconButton(onClick = { vm.selectAll() }) { Icon(Icons.Filled.SelectAll, "Seleziona tutti") }
+                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
                 },
             ) else TopAppBar(
                 title = { Text("SmartScan") },
@@ -241,6 +256,14 @@ fun ArchiveScreen(
             }
         }
     }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text(if (selected.size == 1) "Eliminare il documento?" else "Eliminare ${selected.size} documenti?") },
+        text = { Text("Vengono rimossi dall'archivio locale. Le copie già inviate agli endpoint restano.") },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deleteSelected() }) { Text("Elimina") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla") } },
+    )
 
     if (picker) TreePickerDialog(
         nodes = nodes, endpoints = endpoints, initial = setOfNotNull(filter), single = true, title = "Filtra archivio",

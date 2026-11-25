@@ -324,6 +324,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         val f = cam.cameraControl.enableTorch(on)
         f.addListener({
             runCatching { f.get() }.onFailure { e ->
+                // A newer enableTorch call cancels this one: nothing to retry.
+                if (e.cause is androidx.camera.core.CameraControl.OperationCanceledException) return@addListener
                 Log.w("Scanner", "torch", e)
                 if (_ui.value.torch && torchRetries < 3) {
                     torchRetries++
@@ -747,8 +749,9 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         if (hasCamera) {
             val previewView = remember {
                 PreviewView(context).apply {
-                    // Full screen. On tall phones the 4:3 photo is wider than what the preview shows.
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                    // Whole 4:3 frame (what is captured), aligned to the top under the icons; on tall phones a
+                    // full-screen preview would hide about 40% of the width. Controls sit in the band below.
+                    scaleType = PreviewView.ScaleType.FIT_START
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 }
             }
@@ -1061,9 +1064,9 @@ private fun QuadOverlay(ui: ScannerUi, modifier: Modifier) {
         val q = ui.quad ?: return@Canvas
         val iw = ui.frameW.toFloat()
         val ih = ui.frameH.toFloat()
-        val s = max(size.width / iw, size.height / ih) // matches PreviewView FILL_CENTER
-        val dx = (size.width - iw * s) / 2
-        val dy = (size.height - ih * s) / 2
+        val s = min(size.width / iw, size.height / ih) // matches PreviewView FIT_START
+        val dx = 0f
+        val dy = 0f
         fun p(i: Int) = Offset(q[i * 2] * iw * s + dx, q[i * 2 + 1] * ih * s + dy)
         val path = Path().apply {
             moveTo(p(0).x, p(0).y); lineTo(p(1).x, p(1).y); lineTo(p(2).x, p(2).y); lineTo(p(3).x, p(3).y); close()
