@@ -228,7 +228,11 @@ object ImageProcessor {
     }
 
     /** Divides each channel by an estimate of the background (shadows / uneven light removal). */
-    private fun normalizeIllumination(ch: Mat) {
+    /**
+     * Divides [ch] by its estimated background (page brightness), so shadows and uneven light go away.
+     * [floor] caps the brightening (255 / floor) for large dark or colored areas.
+     */
+    private fun normalizeIllumination(ch: Mat, floor: Double = 0.0) {
         val small = Mat()
         Imgproc.resize(ch, small, Size(), 0.25, 0.25, Imgproc.INTER_AREA)
         val k = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(9.0, 9.0))
@@ -236,20 +240,29 @@ object ImageProcessor {
         Imgproc.medianBlur(small, small, 21)
         val bg = Mat()
         Imgproc.resize(small, bg, ch.size(), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        if (floor > 0) Core.max(bg, org.opencv.core.Scalar(floor), bg)
         Core.divide(ch, bg, ch, 255.0)
         k.release(); small.release(); bg.release()
     }
 
     fun applyFilter(m: Mat, f: PageFilter): Mat = when (f) {
         PageFilter.ORIGINAL -> m
-        PageFilter.ENHANCED -> {
+        // Lightness only (Lab L): shadows removed and the page whitened, hues and saturation unchanged,
+        // so colors stay as in the preview. Per-channel normalization used to shift and saturate colors.
+        PageFilter.ENHANCED -> if (m.channels() != 3) m else {
+            val lab = Mat()
+            Imgproc.cvtColor(m, lab, Imgproc.COLOR_BGR2Lab)
             val chans = ArrayList<Mat>()
-            Core.split(m, chans)
-            chans.forEach { normalizeIllumination(it) }
-            val out = Mat()
-            Core.merge(chans, out)
+            Core.split(lab, chans)
+            lab.release()
+            normalizeIllumination(chans[0], floor = 150.0)
+            chans[0].convertTo(chans[0], -1, 1.1, -20.0)
+            val merged = Mat()
+            Core.merge(chans, merged)
             chans.forEach { it.release() }
-            out.convertTo(out, -1, 1.25, -64.0)
+            val out = Mat()
+            Imgproc.cvtColor(merged, out, Imgproc.COLOR_Lab2BGR)
+            merged.release()
             out
         }
         PageFilter.GRAY -> {

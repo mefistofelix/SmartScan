@@ -74,9 +74,11 @@ object DocumentDetector {
     private const val WORK_SIDE = 360.0
     private const val MIN_AREA = 0.10
     private const val MIN_SUPPORT = 0.55
+    private const val MIN_ANGLE = 60.0
+    private const val MIN_OPPOSITE_RATIO = 0.5
 
     /** Below this chroma (|U-128| + |V-128|) a pixel counts as neutral: white / gray paper. */
-    private const val PAPER_MAX_CHROMA = 30.0
+    private const val PAPER_MAX_CHROMA = 22.0
 
     /**
      * Returns corners (tl, tr, br, bl) in pixel coordinates of [gray], or null.
@@ -155,16 +157,25 @@ object DocumentDetector {
         Imgproc.blur(ch, ch, Size(5.0, 5.0))
         val neutral = Mat()
         Imgproc.threshold(ch, neutral, PAPER_MAX_CHROMA, 255.0, Imgproc.THRESH_BINARY_INV)
-        // Bright: above the mean and above a floor, so gray shadows and dark neutral areas are left out.
-        val mean = Core.mean(small).`val`[0]
+        // Bright: close to the brightest part of the scene (paper is usually the whitest thing in view), so
+        // pale colored areas and gray shadows are left out.
+        val px = ByteArray(small.cols() * small.rows())
+        small.get(0, 0, px)
+        val hist = IntArray(256)
+        for (b in px) hist[b.toInt() and 0xFF]++
+        var acc = 0
+        var p90 = 255
+        for (v in 255 downTo 0) { acc += hist[v]; if (acc >= px.size / 10) { p90 = v; break } }
         val bright = Mat()
-        Imgproc.threshold(small, bright, max(mean + 10.0, 110.0), 255.0, Imgproc.THRESH_BINARY)
+        Imgproc.threshold(small, bright, max(p90 * 0.82, 110.0), 255.0, Imgproc.THRESH_BINARY)
         val mask = Mat()
         Core.bitwise_and(neutral, bright, mask)
-        val k = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
-        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, k)
-        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, k, Point(-1.0, -1.0), 2)
-        k.release(); ch.release(); neutral.release(); bright.release()
+        // Opening with a larger kernel cuts thin bridges between the page and nearby light areas.
+        val ko = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
+        val kc = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, ko)
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kc, Point(-1.0, -1.0), 2)
+        ko.release(); kc.release(); ch.release(); neutral.release(); bright.release()
         return mask
     }
 
@@ -228,14 +239,22 @@ object DocumentDetector {
         val convex = Imgproc.isContourConvex(ip)
         ip.release()
         if (!convex) return false
+        // Any rectangle of any proportions, seen in perspective: every angle within 90° ± 30°, and opposite
+        // sides of similar length (a tilted phone shortens the far side, but not by more than half).
         val minSide = 0.12 * sqrt(frameArea)
+        val sides = DoubleArray(4)
         for (i in 0 until 4) {
             val a = q[(i + 3) % 4]
             val b = q[i]
             val c = q[(i + 1) % 4]
-            if (hypot(c.x - b.x, c.y - b.y) < minSide) return false
+            sides[i] = hypot(c.x - b.x, c.y - b.y)
+            if (sides[i] < minSide) return false
             val ang = angle(a, b, c)
-            if (ang < 45.0 || ang > 135.0) return false
+            if (ang < MIN_ANGLE || ang > 180.0 - MIN_ANGLE) return false
+        }
+        for (i in 0 until 2) {
+            val r = min(sides[i], sides[i + 2]) / max(sides[i], sides[i + 2])
+            if (r < MIN_OPPOSITE_RATIO) return false
         }
         val m = 3.0
         val onBorder = q.count { it.x < m || it.y < m || it.x > w - 1 - m || it.y > h - 1 - m }

@@ -66,8 +66,8 @@ import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.FitScreen
-import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.CloseFullscreen
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
@@ -848,7 +848,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             // Quick toggles as icons (a notice explains each one when tapped); remembered for next sessions.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToggleIcon(
-                    if (ui.fullPreview) Icons.Filled.Fullscreen else Icons.Filled.FitScreen,
+                    if (ui.fullPreview) Icons.Filled.OpenInFull else Icons.Filled.CloseFullscreen,
                     if (ui.fullPreview) "Anteprima: schermo pieno" else "Anteprima: fotogramma intero",
                     on = !ui.fullPreview,
                 ) { vm.togglePreview() }
