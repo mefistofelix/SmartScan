@@ -131,6 +131,7 @@ import java.io.File
 import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.math.max
+import kotlin.math.min
 
 enum class Dictation { PRE, POST, NOTE }
 
@@ -710,7 +711,8 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         if (hasCamera) {
             val previewView = remember {
                 PreviewView(context).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                    // Show the whole 4:3 sensor frame (what is actually captured), not a crop of it.
+                    scaleType = PreviewView.ScaleType.FIT_CENTER
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 }
             }
@@ -993,7 +995,7 @@ private fun QuadOverlay(ui: ScannerUi, modifier: Modifier) {
         val q = ui.quad ?: return@Canvas
         val iw = ui.frameW.toFloat()
         val ih = ui.frameH.toFloat()
-        val s = max(size.width / iw, size.height / ih)
+        val s = min(size.width / iw, size.height / ih) // matches PreviewView FIT_CENTER
         val dx = (size.width - iw * s) / 2
         val dy = (size.height - ih * s) / 2
         fun p(i: Int) = Offset(q[i * 2] * iw * s + dx, q[i * 2 + 1] * ih * s + dy)

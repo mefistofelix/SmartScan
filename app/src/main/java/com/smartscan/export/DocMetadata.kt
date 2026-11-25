@@ -82,6 +82,6 @@ object Xmp {
 
     /** EXIF ASCII fields: accents folded, other characters dropped. */
     fun ascii(s: String): String =
-        Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\p{M}+"), "")
+        Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
             .map { if (it == '\n' || it.code in 0x20..0x7E) it else '?' }.joinToString("")
 }
