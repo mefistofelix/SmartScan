@@ -75,8 +75,17 @@ object DocumentDetector {
     private const val MIN_AREA = 0.10
     private const val MIN_SUPPORT = 0.55
 
-    /** Returns corners (tl, tr, br, bl) in pixel coordinates of [gray], or null. */
-    fun detect(gray: Mat): Array<Point>? {
+    /** Below this chroma (|U-128| + |V-128|) a pixel counts as neutral: white / gray paper. */
+    private const val PAPER_MAX_CHROMA = 30.0
+
+    /**
+     * Returns corners (tl, tr, br, bl) in pixel coordinates of [gray], or null.
+     *
+     * [chroma] (optional, any size, CV_8U: |U-128| + |V-128|) enables the "paper" source: bright and
+     * colorless regions. It finds a white sheet on a busy, colorful background, where edge maps are full
+     * of texture, and it then also favors candidates whose inside is paper.
+     */
+    fun detect(gray: Mat, chroma: Mat? = null): Array<Point>? {
         val maxSide = max(gray.cols(), gray.rows()).toDouble()
         val scale = min(1.0, WORK_SIDE / maxSide)
         val small = Mat()
@@ -107,14 +116,28 @@ object DocumentDetector {
             val w = small.cols()
             val h = small.rows()
             val frameArea = w.toDouble() * h
+            val paper = chroma?.let { paperMask(small, it) }?.also { mats += it }
+                ?.takeIf { Core.countNonZero(it) >= frameArea * MIN_AREA }
+            if (paper != null) {
+                // The paper outline also counts as edge support.
+                val grad = Mat().also { mats += it }
+                val gk = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+                Imgproc.morphologyEx(paper, grad, Imgproc.MORPH_GRADIENT, gk)
+                gk.release()
+                Core.bitwise_or(support, grad, support)
+            }
             var best: Array<Point>? = null
             var bestScore = 0.0
-            for (src in listOf(strong, weak, otsu)) {
+            for (src in listOfNotNull(paper, strong, weak, otsu)) {
                 for (q in candidates(src, frameArea)) {
                     if (!plausible(q, w, h, frameArea)) continue
                     val s = support(q, support)
                     if (s < MIN_SUPPORT) continue
-                    val score = abs(polyArea(q)) / frameArea * s * s * s
+                    var score = abs(polyArea(q)) / frameArea * s * s * s
+                    if (paper != null) {
+                        val f = insideFraction(q, paper)
+                        score *= f * f
+                    }
                     if (score > bestScore) { bestScore = score; best = q }
                 }
             }
@@ -123,6 +146,38 @@ object DocumentDetector {
             small.release()
             mats.forEach { it.release() }
         }
+    }
+
+    /** Bright and neutral pixels of [small] (already closed: text removed), cleaned up. Caller releases. */
+    private fun paperMask(small: Mat, chroma: Mat): Mat {
+        val ch = Mat()
+        Imgproc.resize(chroma, ch, small.size(), 0.0, 0.0, Imgproc.INTER_AREA)
+        Imgproc.blur(ch, ch, Size(5.0, 5.0))
+        val neutral = Mat()
+        Imgproc.threshold(ch, neutral, PAPER_MAX_CHROMA, 255.0, Imgproc.THRESH_BINARY_INV)
+        // Bright: above the mean and above a floor, so gray shadows and dark neutral areas are left out.
+        val mean = Core.mean(small).`val`[0]
+        val bright = Mat()
+        Imgproc.threshold(small, bright, max(mean + 10.0, 110.0), 255.0, Imgproc.THRESH_BINARY)
+        val mask = Mat()
+        Core.bitwise_and(neutral, bright, mask)
+        val k = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, k)
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, k, Point(-1.0, -1.0), 2)
+        k.release(); ch.release(); neutral.release(); bright.release()
+        return mask
+    }
+
+    /** Fraction of the quad's inside that is paper in [mask]. */
+    private fun insideFraction(q: Array<Point>, mask: Mat): Double {
+        val poly = Mat.zeros(mask.size(), CvType.CV_8UC1)
+        val pts = MatOfPoint(*q.map { Point(Math.round(it.x).toDouble(), Math.round(it.y).toDouble()) }.toTypedArray())
+        Imgproc.fillPoly(poly, listOf(pts))
+        val inside = Core.countNonZero(poly)
+        Core.bitwise_and(poly, mask, poly)
+        val paper = Core.countNonZero(poly)
+        poly.release(); pts.release()
+        return if (inside == 0) 0.0 else paper.toDouble() / inside
     }
 
     /** 4-point approximations of every large contour of [bin], directly and through its convex hull. */
@@ -291,6 +346,46 @@ fun ImageProxy.toUprightGray(buffer: ByteArray? = null): Mat {
     }
     val mat = Mat(h, w, CvType.CV_8UC1)
     mat.put(0, 0, data)
+    val code = when (imageInfo.rotationDegrees) {
+        90 -> Core.ROTATE_90_CLOCKWISE
+        180 -> Core.ROTATE_180
+        270 -> Core.ROTATE_90_COUNTERCLOCKWISE
+        else -> return mat
+    }
+    val r = Mat()
+    Core.rotate(mat, r, code)
+    mat.release()
+    return r
+}
+
+/**
+ * Chroma magnitude |U-128| + |V-128| of a YUV_420_888 ImageProxy, upright, at half resolution.
+ * Low values are neutral colors (white / gray paper). [buffer] is reused between frames when it fits.
+ */
+fun ImageProxy.toUprightChroma(buffer: ByteArray? = null): Mat {
+    val u = planes[1]
+    val v = planes[2]
+    val cw = width / 2
+    val chh = height / 2
+    val ub = u.buffer
+    val vb = v.buffer
+    val ups = u.pixelStride
+    val vps = v.pixelStride
+    val urs = u.rowStride
+    val vrs = v.rowStride
+    val out = if (buffer != null && buffer.size == cw * chh) buffer else ByteArray(cw * chh)
+    for (y in 0 until chh) {
+        val uo = y * urs
+        val vo = y * vrs
+        val oo = y * cw
+        for (x in 0 until cw) {
+            val uu = (ub.get(uo + x * ups).toInt() and 0xFF) - 128
+            val vv = (vb.get(vo + x * vps).toInt() and 0xFF) - 128
+            out[oo + x] = minOf(255, kotlin.math.abs(uu) + kotlin.math.abs(vv)).toByte()
+        }
+    }
+    val mat = Mat(chh, cw, CvType.CV_8UC1)
+    mat.put(0, 0, out)
     val code = when (imageInfo.rotationDegrees) {
         90 -> Core.ROTATE_90_CLOCKWISE
         180 -> Core.ROTATE_180

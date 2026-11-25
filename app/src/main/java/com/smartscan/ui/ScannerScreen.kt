@@ -117,6 +117,7 @@ import com.smartscan.scan.AutoCaptureController.Phase
 import com.smartscan.scan.DocumentDetector
 import com.smartscan.scan.LocationTracker
 import com.smartscan.scan.QuadTracker
+import com.smartscan.scan.toUprightChroma
 import com.smartscan.scan.toUprightGray
 import com.smartscan.voice.VoiceCommand
 import com.smartscan.voice.VoiceCommands
@@ -226,6 +227,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
     private var grayBuf: ByteArray? = null
+    private var chromaBuf: ByteArray? = null
     @Volatile private var lastSig = ByteArray(0)
     @Volatile private var smoothed: FloatArray? = null
     private val voice = VoiceController(app, settings.voiceLanguage)
@@ -290,7 +292,12 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         analysis.setAnalyzer(executor) { proxy ->
             try {
                 val gray = proxy.toUprightGray(grayBuf)
-                val q = if (_ui.value.edges) DocumentDetector.detect(gray) else null
+                val q = if (_ui.value.edges) {
+                    val n = (proxy.width / 2) * (proxy.height / 2)
+                    val buf = chromaBuf?.takeIf { it.size == n } ?: ByteArray(n).also { chromaBuf = it }
+                    val chroma = proxy.toUprightChroma(buf)
+                    try { DocumentDetector.detect(gray, chroma) } finally { chroma.release() }
+                } else null
                 val sharp = DocumentDetector.sharpness(gray)
                 val sig = DocumentDetector.signature(gray)
                 val w = gray.cols(); val h = gray.rows()

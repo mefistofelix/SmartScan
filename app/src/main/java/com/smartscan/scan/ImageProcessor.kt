@@ -4,6 +4,7 @@ import androidx.exifinterface.media.ExifInterface
 import com.smartscan.data.PageEntity
 import com.smartscan.data.PageFilter
 import org.opencv.core.Core
+import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfInt
 import org.opencv.core.MatOfPoint
@@ -56,9 +57,25 @@ object ImageProcessor {
 
     /** Detects page corners on a stored (upright) image; result normalized to 0..1. */
     fun detectCorners(path: String): FloatArray? {
-        val gray = Imgcodecs.imread(path, Imgcodecs.IMREAD_REDUCED_GRAYSCALE_4)
-        if (gray.empty()) return null
-        val q = DocumentDetector.detect(gray)
+        val color = Imgcodecs.imread(path, Imgcodecs.IMREAD_REDUCED_COLOR_4)
+        if (color.empty()) return null
+        val gray = Mat()
+        Imgproc.cvtColor(color, gray, Imgproc.COLOR_BGR2GRAY)
+        // Chroma |Cr-128| + |Cb-128|, same meaning as the live camera one (white paper = low).
+        val ycc = Mat()
+        Imgproc.cvtColor(color, ycc, Imgproc.COLOR_BGR2YCrCb)
+        color.release()
+        val ch = ArrayList<Mat>()
+        Core.split(ycc, ch)
+        ycc.release()
+        val mid = Mat(gray.size(), CvType.CV_8UC1, org.opencv.core.Scalar(128.0))
+        Core.absdiff(ch[1], mid, ch[1])
+        Core.absdiff(ch[2], mid, ch[2])
+        val chroma = Mat()
+        Core.add(ch[1], ch[2], chroma)
+        mid.release(); ch.forEach { it.release() }
+        val q = DocumentDetector.detect(gray, chroma)
+        chroma.release()
         val w = gray.cols().toDouble()
         val h = gray.rows().toDouble()
         gray.release()
