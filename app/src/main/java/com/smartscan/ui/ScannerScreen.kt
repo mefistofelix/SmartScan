@@ -223,6 +223,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private val controller = AutoCaptureController()
     private val tracker = QuadTracker()
+    /** Neural model on its own thread + optical flow between its results: corners at camera frame rate. */
+    private val liveCorners = com.smartscan.scan.LiveCornerDetector()
     private val location = LocationTracker(app)
     private val executor = Executors.newSingleThreadExecutor()
     private var imageCapture: ImageCapture? = null
@@ -302,7 +304,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 val norm = if (_ui.value.edges) {
                     val bgr = Mat()
                     Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR)
-                    try { DocumentDetector.detectNormalized(bgr, gray) } finally { bgr.release() }
+                    try { liveCorners.process(bgr, gray) } finally { bgr.release() }
                 } else null
                 rgba.release()
                 val sharp = DocumentDetector.sharpness(gray)
@@ -745,6 +747,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     }
 
     override fun onCleared() {
+        liveCorners.release()
         location.stop()
         main.removeCallbacksAndMessages(null)
         voice.destroy()

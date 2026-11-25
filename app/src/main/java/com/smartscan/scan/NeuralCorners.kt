@@ -44,11 +44,23 @@ object NeuralCorners {
         try {
             val bytes = context.assets.open("docaligner_lcnet100.onnx").use { it.readBytes() }
             val e = OrtEnvironment.getEnvironment()
-            val opts = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(4)
+            fun options(xnnpack: Boolean) = OrtSession.SessionOptions().apply {
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                if (xnnpack) {
+                    // XNNPACK: ARM-optimized kernels, usually 2-3x faster than the default CPU ones on phones.
+                    // ORT recommends one ORT thread when XNNPACK has its own pool.
+                    setIntraOpNumThreads(1)
+                    addXnnpack(mapOf("intra_op_num_threads" to "4"))
+                } else {
+                    setIntraOpNumThreads(4)
+                }
             }
-            val s = e.createSession(bytes, opts)
+            val s = try {
+                e.createSession(bytes, options(xnnpack = true))
+            } catch (t: Throwable) {
+                Log.w(TAG, "XNNPACK not available, plain CPU", t)
+                e.createSession(bytes, options(xnnpack = false))
+            }
             inputName = s.inputNames.firstOrNull() ?: inputName
             outputName = s.outputNames.firstOrNull { it == "heatmap" } ?: s.outputNames.first()
             env = e
