@@ -34,6 +34,8 @@ object NeuralCorners {
     private var outputName = "heatmap"
     private var calls = 0
     private var totalMs = 0L
+    /** Heatmap peak of each corner in the last [detect] call (diagnostics). */
+    val lastPeaks = FloatArray(4)
 
     val ready: Boolean get() = session != null
 
@@ -128,6 +130,12 @@ object NeuralCorners {
                 val data = FloatArray(buf.remaining())
                 buf.get(data)
                 val result = FloatArray(8)
+                lastPeaks.fill(0f)
+                for (c in 0 until 4) {
+                    var m = 0f
+                    for (i in c * h * w until (c + 1) * h * w) if (data[i] > m) m = data[i]
+                    lastPeaks[c] = m
+                }
                 for (c in 0 until 4) {
                     val p = peak(data, c * h * w, w, h) ?: return null
                     result[c * 2] = p.first
@@ -172,4 +180,34 @@ object NeuralCorners {
         val o = DocumentDetector.order(pts)
         return FloatArray(8) { i -> (if (i % 2 == 0) o[i / 2].x else o[i / 2].y).toFloat() }
     }
+}
+
+/**
+ * Diagnostics (adb only): `adb shell am start -n com.smartscan/.MainActivity --ez debugCorners true`
+ * runs the detector on every stored original photo and logs, per photo, the corner heatmap peaks, the raw
+ * model corners and whether the shape check accepted them (tag NeuralDebug).
+ */
+object CornerDebug {
+    fun run(context: Context) = Thread {
+        NeuralCorners.init(context)
+        val files = java.io.File(context.filesDir, "docs").walkTopDown()
+            .filter { it.isFile && it.name.startsWith("orig_") }.toList().sortedBy { it.lastModified() }
+        Log.i("NeuralDebug", "photos: ${files.size}")
+        for (f in files) {
+            val bgr = org.opencv.imgcodecs.Imgcodecs.imread(f.absolutePath, org.opencv.imgcodecs.Imgcodecs.IMREAD_REDUCED_COLOR_4)
+            if (bgr.empty()) continue
+            val raw = NeuralCorners.detect(bgr)
+            val peaks = NeuralCorners.lastPeaks.joinToString { "%.2f".format(java.util.Locale.US, it) }
+            val gray = Mat()
+            Imgproc.cvtColor(bgr, gray, Imgproc.COLOR_BGR2GRAY)
+            val ok = DocumentDetector.detectNormalized(bgr, gray)
+            Log.i(
+                "NeuralDebug",
+                "${f.parentFile?.name}/${f.name} ${bgr.cols()}x${bgr.rows()} peaks=[$peaks] " +
+                    "raw=${raw?.joinToString { "%.2f".format(java.util.Locale.US, it) }} accepted=${ok != null}",
+            )
+            bgr.release(); gray.release()
+        }
+        Log.i("NeuralDebug", "done")
+    }.start()
 }
