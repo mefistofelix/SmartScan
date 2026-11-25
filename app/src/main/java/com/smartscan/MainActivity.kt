@@ -10,6 +10,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -61,6 +65,14 @@ fun AppNav() {
     val pending by DeepLinks.pending.collectAsState()
     LaunchedEffect(pending) {
         if (pending != null && nav.currentDestination?.route != "endpoints") nav.navigate("endpoints")
+    }
+    val ctx = LocalContext.current
+    var launched by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!launched) {
+            launched = true
+            if (ctx.container.settings.startInScanner && DeepLinks.pending.value == null) nav.navigate("scanner/-1")
+        }
     }
     NavHost(nav, startDestination = "archive") {
         composable("archive") {

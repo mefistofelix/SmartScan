@@ -11,15 +11,19 @@ L'APK si scarica dalla pagina **Releases** (build di debug firmata con la chiave
 | Area | Cosa fa |
 |---|---|
 | **Acquisizione** | CameraX a pieno schermo, rilevamento bordi in tempo reale (OpenCV), **scatto automatico** quando il foglio è fermo e a fuoco, **attesa automatica della pagina successiva** (rileva il cambio di scena), flash, tap-to-focus, **tasti volume come otturatore**. |
-| **Flusso continuo** | Nessuna modalità da scegliere: scatti le pagine, in basso a sinistra vedi l'anteprima con il numero di pagine (tocco = elenco con eliminazione), in basso a destra scegli **PDF / IMG** (predefinito PDF) e premi **Fine**. Il documento va in archivio, OCR e upload partono in background e la fotocamera resta pronta per il documento successivo. Chiudendo la fotocamera le pagine in sospeso vengono salvate. |
+| **Flusso continuo** | L'app si apre direttamente in fotocamera (disattivabile nelle impostazioni). Nessuna modalità da scegliere: scatti le pagine, in basso a sinistra vedi l'anteprima con il numero di pagine (tocco = elenco con eliminazione), in basso a destra scegli **PDF / IMG** (predefinito PDF) e premi **Fine**. Il documento va in archivio, OCR e upload partono in background e la fotocamera resta pronta per il documento successivo. Chiudendo la fotocamera le pagine in sospeso vengono salvate. |
+| **Comandi rapidi** | In fotocamera, un tocco ciascuno (la scelta resta per le volte successive): **HQ** (qualità massima: risoluzione piena del sensore, compressione minima, nessun ridimensionamento in esportazione), **Bordi** (spento: pagina intera e scatto manuale), **Raddrizza** (raddrizzamento automatico), **GPS** (salva la posizione con ogni pagina). La **luce** è una torcia: se attiva resta sempre accesa, non lampeggia allo scatto. L'icona elenco in alto a sinistra salva e apre l'elenco dei documenti. |
+| **Note vocali** | Pulsante nota in basso a sinistra: detti una nota per il documento in corso, anche più volte. Ogni nota si aggiunge alle note del documento e a quelle dell'ultima pagina scattata. Se il documento non ha ancora un titolo, le prime parole della prima nota diventano il nome (modificabile: tocca il titolo nella scheda del documento). Senza note il nome è automatico («Scansione data ora»). |
+| **QR e codici a barre** | Durante l'OCR ogni pagina viene letta anche per QR code e codici a barre (tutti i formati, anche più di uno per pagina). I valori decodificati finiscono nei metadati. |
+| **Metadati nei file** | PDF: titolo, note (Subject), categorie e tag (Keywords), codici e posizione nel dizionario Info, e su ogni pagina una nota (annotazione non stampata) con nota vocale, codici e posizione della pagina. Immagini: EXIF (descrizione, commento, GPS) e XMP con il testo completo (titolo, note, tag, nota e codici della pagina). |
 | **Elaborazione** | Correzione prospettica, **raddrizzamento automatico** (deskew sulle righe di testo), editor manuale dei 4 angoli con lente d'ingrandimento, **espansione / restringimento dei bordi**, «pagina intera», rotazione, riordino ed eliminazione pagine. |
 | **Filtri** | Originale, Migliorato (rimozione ombre e normalizzazione dell'illuminazione), Grigi, Bianco/nero (soglia adattiva, salvato a 1 bit). |
 | **OCR** | ML Kit on-device (offline), in background con WorkManager. Testo ricercabile nell'archivio. |
 | **Esportazione** | PDF, **PDF ricercabile** (livello di testo OCR invisibile), JPEG/PNG, TXT. Scrittore PDF proprio: i JPEG vengono inseriti senza ricodifica e il B/N come immagine a 1 bit compressa Flate, quindi file piccoli. Qualità Alta/Media/Compatta e pagina Auto/A4/Letter. Condivisione o «Salva come…». |
-| **Archivio** | Locale (Room + file privati dell'app), ricerca su titolo, note, testo OCR e tag; filtro per ramo dell'albero delle categorie. |
+| **Archivio** | Locale (Room + file privati dell'app), ricerca su titolo, note, testo OCR e tag; filtro per ramo dell'albero delle categorie. Tieni premuto un documento per la **selezione multipla** e condividi tutti i selezionati in **un unico ZIP** (ogni documento nel suo formato: PDF ricercabile o cartella di immagini). |
 | **Categorie e tag** | Due alberi di profondità arbitraria (categorie, tag/etichette), assegnazione multipla per documento. Alberi locali modificabili e **alberi remoti** scaricati dagli endpoint (sola lettura, unione con id stabili). |
 | **Endpoint di storage** | Aggiunta da **QR code** (o link `smartscan://add?cfg=…`) con conferma esplicita dell'host. HTTP multipart o WebDAV. **Upload in background** con nuovi tentativi, vincolo «solo Wi-Fi», invio automatico o manuale. |
-| **Voce** | Comandi durante la scansione: «scatta», «pagina successiva», «fine documento», «nuovo documento», «annulla ultima», «automatico», «flash». Dettatura dei metadati **prima** (a inizio documento), **durante** o **dopo** (a «Fine», prima del salvataggio). |
+| **Voce** | Comandi durante la scansione: «scatta», «pagina successiva», «fine documento», «nuovo documento», «annulla ultima», «automatico», «flash». Dettatura dei metadati **prima** (all'apertura della fotocamera), **durante** o **dopo** (a «Fine», prima del salvataggio). Dopo «Fine» la fotocamera è subito pronta, senza schermate in mezzo. |
 
 ### Metadati a voce
 
@@ -77,11 +81,16 @@ Una risposta `2xx` conta come riuscita. Se il corpo è `{"id": "..."}`, l'id vie
   "categories": [{ "name": "Bollette", "path": "Casa/Bollette", "id": "c-12", "source": "endpoint" }],
   "tags": [{ "name": "urgente", "path": "urgente", "source": "local" }],
   "files": ["Fattura Enel_42.pdf"],
-  "ocrText": "…"
+  "ocrText": "…",
+  "pageInfo": [
+    { "page": 1, "note": "pagare entro venerdì", "lat": 45.4642, "lon": 9.19,
+      "codes": [{ "format": "qr", "value": "https://example.com/f/123" }] },
+    { "page": 2, "codes": [] }
+  ]
 }
 ```
 
-`id` è presente solo per le voci che provengono dalla tassonomia di **questo** endpoint.
+`id` è presente solo per le voci che provengono dalla tassonomia di **questo** endpoint. `pageInfo` (dalla 0.3) ha una voce per pagina: `note`, `lat`/`lon` (solo se il GPS era attivo) e `codes` (QR e codici a barre decodificati; `format` è `qr`, `ean13`, `code128`, `datamatrix`, `pdf417`, …). I server più vecchi possono ignorarlo.
 
 ### WebDAV
 

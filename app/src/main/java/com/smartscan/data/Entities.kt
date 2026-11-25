@@ -61,6 +61,13 @@ data class PageEntity(
     /** null = OCR not run yet. */
     val ocrText: String? = null,
     val ocrLines: String = "[]",
+    /** Voice notes dictated while this was the last page (one per line). Written into the PDF and image metadata. */
+    val note: String = "",
+    /** Where the page was captured («GPS» toggle in the scanner), null when off or unavailable. */
+    val lat: Double? = null,
+    val lon: Double? = null,
+    /** QR codes / barcodes decoded on the page, JSON list of PageCode. Filled with the OCR. */
+    val codes: String = "[]",
 )
 
 @Entity(

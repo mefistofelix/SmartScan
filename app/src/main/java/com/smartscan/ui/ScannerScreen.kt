@@ -15,11 +15,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
+import androidx.camera.core.TorchState
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -51,10 +53,12 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.FlashlightOff
+import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Badge
@@ -101,6 +105,7 @@ import com.smartscan.data.PageEntity
 import com.smartscan.scan.AutoCaptureController
 import com.smartscan.scan.AutoCaptureController.Phase
 import com.smartscan.scan.DocumentDetector
+import com.smartscan.scan.LocationTracker
 import com.smartscan.scan.QuadTracker
 import com.smartscan.scan.toUprightGray
 import com.smartscan.voice.VoiceCommand
@@ -127,7 +132,7 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.math.max
 
-enum class Dictation { PRE, POST }
+enum class Dictation { PRE, POST, NOTE }
 
 data class ScannerUi(
     val quad: FloatArray? = null,
@@ -137,6 +142,13 @@ data class ScannerUi(
     val progress: Float = 0f,
     val auto: Boolean = true,
     val torch: Boolean = false,
+    /** Quick toggles, persisted in AppSettings. */
+    val hq: Boolean = false,
+    val edges: Boolean = true,
+    val deskew: Boolean = true,
+    val geo: Boolean = false,
+    /** Voice notes added to the current document. */
+    val noteCount: Int = 0,
     val capturing: Boolean = false,
     val processing: Int = 0,
     val voiceOn: Boolean = false,
@@ -157,6 +169,8 @@ sealed interface ScanEvent {
     data object Closed : ScanEvent
     data class Message(val text: String) : ScanEvent
     data object Shutter : ScanEvent
+    data object NeedAudio : ScanEvent
+    data object NeedLocation : ScanEvent
 }
 
 /**
@@ -169,7 +183,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     private val c = app.container
     private val settings = c.settings
     private val docIdFlow = MutableStateFlow<Long?>(null)
-    private val _ui = MutableStateFlow(ScannerUi(auto = settings.autoCapture))
+    private val _ui = MutableStateFlow(
+        ScannerUi(
+            auto = settings.autoCapture, hq = settings.maxQuality,
+            edges = settings.edgeDetect, deskew = settings.autoDeskew,
+            geo = settings.geoTag,
+        )
+    )
     val ui: StateFlow<ScannerUi> = _ui.asStateFlow()
     val pages: StateFlow<List<PageEntity>> = docIdFlow.filterNotNull()
         .flatMapLatest { c.repo.observePages(it) }
@@ -179,6 +199,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private val controller = AutoCaptureController()
     private val tracker = QuadTracker()
+    private val location = LocationTracker(app)
     private val executor = Executors.newSingleThreadExecutor()
     private var imageCapture: ImageCapture? = null
     private var camera: Camera? = null
@@ -206,13 +227,27 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             val f = ProcessCameraProvider.getInstance(ctx)
             f.addListener({ cont.resume(f.get()) }, ContextCompat.getMainExecutor(ctx))
         }
+        binding = Triple(provider, owner, view)
+        bindUseCases()
+    }
+
+    private var binding: Triple<ProcessCameraProvider, LifecycleOwner, PreviewView>? = null
+    private var torchRetries = 0
+
+    /** (Re)binds preview, capture and analysis. Called again when «Qualità max» changes the capture mode. */
+    private fun bindUseCases() {
+        val (provider, owner, view) = binding ?: return
         val ratio = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
         val preview = Preview.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio).build())
             .build()
         preview.setSurfaceProvider(view.surfaceProvider)
         val capture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(
+                if (_ui.value.hq) ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY else ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+            )
+            // The light is a torch (always on while enabled), never a flash fired at capture time.
+            .setFlashMode(ImageCapture.FLASH_MODE_OFF)
             .setResolutionSelector(
                 ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
                     .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY).build()
@@ -230,7 +265,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         analysis.setAnalyzer(executor) { proxy ->
             try {
                 val gray = proxy.toUprightGray(grayBuf)
-                val q = DocumentDetector.detect(gray)
+                val q = if (_ui.value.edges) DocumentDetector.detect(gray) else null
                 val sharp = DocumentDetector.sharpness(gray)
                 val sig = DocumentDetector.signature(gray)
                 val w = gray.cols(); val h = gray.rows()
@@ -246,9 +281,46 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             }
         }
         provider.unbindAll()
-        camera = provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture, analysis)
+        val cam = provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture, analysis)
+        camera = cam
         imageCapture = capture
-        camera?.cameraControl?.enableTorch(_ui.value.torch)
+        // Some devices (Samsung) drop a torch request sent before the session streams, or switch the
+        // torch off after a capture: apply it again whenever the camera opens or the torch goes off.
+        cam.cameraInfo.cameraState.removeObservers(owner)
+        cam.cameraInfo.torchState.removeObservers(owner)
+        cam.cameraInfo.cameraState.observe(owner) { st ->
+            if (st.type == CameraState.Type.OPEN && _ui.value.torch) applyTorch()
+        }
+        cam.cameraInfo.torchState.observe(owner) { st ->
+            if (st == TorchState.ON) torchRetries = 0
+            else if (_ui.value.torch && !closing && torchRetries < 3) {
+                torchRetries++
+                main.postDelayed({ if (_ui.value.torch) applyTorch() }, 300)
+            }
+        }
+        applyTorch()
+    }
+
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun applyTorch() {
+        val cam = camera ?: return
+        val on = _ui.value.torch
+        if (on && !cam.cameraInfo.hasFlashUnit()) {
+            _ui.update { it.copy(torch = false) }
+            notify("Questa fotocamera non ha la luce")
+            return
+        }
+        val f = cam.cameraControl.enableTorch(on)
+        f.addListener({
+            runCatching { f.get() }.onFailure { e ->
+                Log.w("Scanner", "torch", e)
+                if (_ui.value.torch && torchRetries < 3) {
+                    torchRetries++
+                    main.postDelayed({ applyTorch() }, 400)
+                }
+            }
+        }, ContextCompat.getMainExecutor(getApplication()))
     }
 
     fun focusAt(view: PreviewView, x: Float, y: Float) {
@@ -283,12 +355,18 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             ContextCompat.getMainExecutor(getApplication()),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    if (_ui.value.torch) { torchRetries = 0; applyTorch() }
                     controller.onCaptured(sig, SystemClock.elapsedRealtime())
                     events.tryEmit(ScanEvent.Shutter)
                     _ui.update { it.copy(capturing = false, processing = it.processing + 1, flashTick = it.flashTick + 1) }
+                    val u = _ui.value
+                    val loc = if (u.geo) location.current() else null
                     viewModelScope.launch {
                         try {
-                            c.repo.addCapturedPage(id, raw, hint, settings.defaultFilter, settings.autoDeskew)
+                            c.repo.addCapturedPage(
+                                id, raw, hint?.takeIf { u.edges }, settings.defaultFilter, u.deskew,
+                                detect = u.edges, hq = u.hq, lat = loc?.latitude, lon = loc?.longitude,
+                            )
                         } catch (e: Exception) {
                             Log.e("Scanner", "process", e)
                             events.tryEmit(ScanEvent.Message("Errore elaborazione: ${e.message}"))
@@ -333,9 +411,10 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 docIdFlow.value = c.repo.createDraft()
                 controller.reset()
                 tracker.reset()
-                _ui.update { it.copy(metaSummary = null, showPages = false, savedCount = it.savedCount + 1) }
+                _ui.update { it.copy(metaSummary = null, showPages = false, noteCount = 0, savedCount = it.savedCount + 1) }
                 notify("Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}")
-                if (!closing) { if (settings.voiceMetaPre && voiceReady()) preDictation() else resumeCommands() }
+                // Straight back to the camera: no dictation prompt in between (pre-dictation only when the scanner opens).
+                if (!closing) resumeCommands()
             } finally {
                 _ui.update { it.copy(saving = false) }
             }
@@ -398,9 +477,96 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     }
 
     fun toggleTorch() {
-        val v = !_ui.value.torch
-        camera?.cameraControl?.enableTorch(v)
-        _ui.update { it.copy(torch = v) }
+        _ui.update { it.copy(torch = !it.torch) }
+        torchRetries = 0
+        applyTorch()
+    }
+
+    fun toggleHq() {
+        val v = !_ui.value.hq
+        settings.maxQuality = v
+        _ui.update { it.copy(hq = v) }
+        notify(if (v) "Qualità massima: file più grandi" else "Qualità normale")
+        if (!_ui.value.capturing) bindUseCases()
+    }
+
+    fun toggleEdges() {
+        val v = !_ui.value.edges
+        settings.edgeDetect = v
+        controller.reset()
+        tracker.reset()
+        _ui.update { it.copy(edges = v, quad = null, progress = 0f) }
+        notify(if (v) "Rilevamento bordi attivo" else "Bordi spenti: pagina intera, scatto manuale")
+    }
+
+    fun toggleDeskew() {
+        val v = !_ui.value.deskew
+        settings.autoDeskew = v
+        _ui.update { it.copy(deskew = v) }
+        notify(if (v) "Raddrizzamento automatico attivo" else "Raddrizzamento automatico spento")
+    }
+
+    /** «GPS»: the position is saved with every page while on. Asks for the permission the first time. */
+    fun toggleGeo() {
+        if (_ui.value.geo) {
+            settings.geoTag = false
+            location.stop()
+            _ui.update { it.copy(geo = false) }
+            notify("Posizione non salvata")
+        } else if (!hasLocationPermission()) {
+            events.tryEmit(ScanEvent.NeedLocation)
+        } else enableGeo()
+    }
+
+    fun onLocationPermission(granted: Boolean) {
+        if (granted) enableGeo() else notify("Serve il permesso posizione")
+    }
+
+    /** Called when the scanner opens: resumes tracking if «GPS» was left on. */
+    fun resumeGeo() {
+        if (_ui.value.geo) { if (hasLocationPermission()) location.start() else _ui.update { it.copy(geo = false) } }
+    }
+
+    private fun enableGeo() {
+        settings.geoTag = true
+        location.start()
+        _ui.update { it.copy(geo = true) }
+        notify(if (location.anyProviderEnabled) "Posizione salvata con ogni pagina" else "Attiva la localizzazione del telefono")
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        val ctx = getApplication<Application>()
+        return listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            .any { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }
+    }
+
+    // ---------- voice notes ----------
+
+    /** Dictates a note for the current document; can be repeated, each note is appended. */
+    fun recordNote() {
+        if (_ui.value.dictation == Dictation.NOTE) { skipDictation(); return }
+        if (_ui.value.dictation != null || _ui.value.saving || closing) return
+        if (!voice.available) { notify("Riconoscimento vocale non disponibile"); return }
+        if (!audioOk) { events.tryEmit(ScanEvent.NeedAudio); return }
+        val wasOn = _ui.value.voiceOn
+        viewModelScope.launch {
+            _ui.update { it.copy(dictation = Dictation.NOTE) }
+            val text = dictate()
+            _ui.update { it.copy(dictation = null) }
+            if (!text.isNullOrBlank()) {
+                val id = docIdFlow.first { it != null }!!
+                val doc = c.repo.appendNote(id, text, pages.value.lastOrNull()?.id)
+                _ui.update { it.copy(noteCount = it.noteCount + 1) }
+                notify("Nota aggiunta" + (doc?.title?.takeIf { it.isNotBlank() }?.let { " · «$it»" } ?: ""))
+            }
+            if (closing) return@launch
+            if (wasOn) startCommands() else _ui.update { it.copy(voiceOn = false) }
+        }
+    }
+
+    fun onAudioForNote(granted: Boolean) {
+        audioOk = audioOk || granted
+        if (granted) recordNote() else notify("Serve il permesso microfono per le note vocali")
     }
 
     // ---------- voice ----------
@@ -475,6 +641,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     }
 
     override fun onCleared() {
+        location.stop()
+        main.removeCallbacksAndMessages(null)
         voice.destroy()
         executor.shutdown()
         super.onCleared()
@@ -500,6 +668,13 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         hasCamera = hasCamera || res[Manifest.permission.CAMERA] == true
         vm.onPermissions(res[Manifest.permission.RECORD_AUDIO] == true || granted(Manifest.permission.RECORD_AUDIO))
     }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        vm.onLocationPermission(res.values.any { it })
+    }
+    LaunchedEffect(Unit) { vm.resumeGeo() }
+    val audioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        vm.onAudioForNote(ok)
+    }
     LaunchedEffect(Unit) {
         val needed = buildList {
             if (!hasCamera) add(Manifest.permission.CAMERA)
@@ -512,6 +687,10 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
         vm.events.collect { e ->
             when (e) {
                 ScanEvent.Closed -> onClose()
+                ScanEvent.NeedAudio -> audioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                ScanEvent.NeedLocation -> locationLauncher.launch(
+                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                )
                 is ScanEvent.Message -> Toast.makeText(context, e.text, Toast.LENGTH_SHORT).show()
                 ScanEvent.Shutter -> {
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
@@ -558,12 +737,19 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { vm.close() }) { Icon(Icons.Filled.Close, "Chiudi", tint = Color.White) }
-            if (ui.savedCount > 0) Pill("✓ ${ui.savedCount} salvati")
+            IconButton(onClick = { vm.close() }) {
+                Icon(Icons.AutoMirrored.Filled.List, "Elenco documenti", tint = Color.White)
+            }
+            if (ui.savedCount > 0) Box(Modifier.clip(RoundedCornerShape(50)).clickable { vm.close() }) {
+                Pill("✓ ${ui.savedCount} salvati")
+            }
             Spacer(Modifier.weight(1f))
             ScanChip("Auto", ui.auto) { vm.toggleAuto() }
             IconButton(onClick = { vm.toggleTorch() }) {
-                Icon(if (ui.torch) Icons.Filled.FlashOn else Icons.Filled.FlashOff, "Flash", tint = Color.White)
+                Icon(
+                    if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, "Luce",
+                    tint = if (ui.torch) Color(0xFFFFD54F) else Color.White,
+                )
             }
             if (ui.voiceAvailable) IconButton(onClick = { vm.toggleVoice() }) {
                 Icon(
@@ -573,14 +759,26 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             }
         }
 
+        // Quick toggles: one tap each, remembered for the next sessions
+        Row(
+            Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 56.dp, end = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            ScanChip("HQ", ui.hq) { vm.toggleHq() }
+            ScanChip("Bordi", ui.edges) { vm.toggleEdges() }
+            ScanChip("Raddrizza", ui.deskew) { vm.toggleDeskew() }
+            ScanChip("GPS", ui.geo) { vm.toggleGeo() }
+        }
+
         // Hints
         Column(
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 64.dp, start = 24.dp, end = 24.dp),
+            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 112.dp, start = 24.dp, end = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             val hint = when {
                 ui.notice != null -> ui.notice!!
                 ui.saving -> "Salvo il documento…"
+                !ui.edges -> "Bordi spenti · scatta col pulsante o un tasto volume"
                 !ui.auto -> "Premi il pulsante o un tasto volume"
                 ui.phase == Phase.WAIT_NEXT -> "Pagina acquisita · metti la prossima"
                 ui.phase == Phase.STEADYING -> "Tieni fermo…"
@@ -601,12 +799,16 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             ) {
                 Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(48.dp))
                 Text(
-                    if (kind == Dictation.PRE) "Nuovo documento: detta i metadati" else "Documento finito: detta i metadati",
+                    when (kind) {
+                        Dictation.PRE -> "Nuovo documento: detta i metadati"
+                        Dictation.POST -> "Documento finito: detta i metadati"
+                        Dictation.NOTE -> "Detta la nota" + if (pages.isNotEmpty()) " (pagina ${pages.size})" else ""
+                    },
                     color = Color.White, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center,
                 )
-                Text(partial.ifBlank { "«titolo … categoria … tag …»" }, color = Color.White, textAlign = TextAlign.Center)
+                Text(partial.ifBlank { if (kind == Dictation.NOTE) "Parla, mi fermo quando smetti" else "«titolo … categoria … tag …»" }, color = Color.White, textAlign = TextAlign.Center)
                 Spacer(Modifier.size(12.dp))
-                Button(onClick = { vm.skipDictation() }) { Text("Salta") }
+                Button(onClick = { vm.skipDictation() }) { Text(if (kind == Dictation.NOTE) "Annulla" else "Salta") }
             }
         }
 
@@ -619,7 +821,11 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             ) {
                 // Left: current document pages
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    PagesButton(pages, ui.processing) { vm.togglePages() }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        NoteButton(ui.noteCount, active = ui.dictation == Dictation.NOTE) { vm.recordNote() }
+                        Spacer(Modifier.height(10.dp))
+                        PagesButton(pages, ui.processing) { vm.togglePages() }
+                    }
                 }
                 ShutterButton(progress = ui.progress, busy = ui.capturing || ui.saving) { vm.capture() }
                 // Right: output format + Fine
@@ -642,6 +848,20 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/** Dictates a note for the current document (repeatable). The badge counts the notes added. */
+@Composable
+private fun NoteButton(count: Int, active: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(width = 60.dp, height = 52.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(48.dp).clip(CircleShape)
+                .background(if (active) MaterialTheme.colorScheme.tertiary else Color(0x99000000))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Filled.EditNote, "Nota vocale", tint = Color.White) }
+        if (count > 0) Badge(Modifier.align(Alignment.TopEnd)) { Text("$count") }
     }
 }
 

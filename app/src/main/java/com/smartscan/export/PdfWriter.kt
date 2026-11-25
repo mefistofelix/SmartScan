@@ -21,7 +21,14 @@ class EncodedImage(
     enum class Kind { JPEG_RGB, JPEG_GRAY, BITS1_FLATE }
 }
 
-class PdfPage(val image: EncodedImage, val ocr: List<OcrLine>?)
+class PdfPage(val image: EncodedImage, val ocr: List<OcrLine>?, val note: String? = null)
+
+/** Document information dictionary entries beyond the title. Custom keys must be plain PDF names. */
+class PdfInfo(
+    val subject: String = "",
+    val keywords: String = "",
+    val custom: Map<String, String> = emptyMap(),
+)
 
 /**
  * Minimal PDF 1.4 writer. Images are embedded as-is (JPEG passthrough or 1-bit Flate),
@@ -49,7 +56,7 @@ class PdfWriter(private val out: OutputStream) {
         raw("\nendstream\nendobj\n")
     }
 
-    fun write(pages: List<PdfPage>, title: String, pageSize: PdfPageSize) {
+    fun write(pages: List<PdfPage>, title: String, pageSize: PdfPageSize, meta: PdfInfo = PdfInfo()) {
         raw("%PDF-1.4\n")
         raw(byteArrayOf(0x25, 0xE2.toByte(), 0xE3.toByte(), 0xCF.toByte(), 0xD3.toByte(), 0x0A))
 
@@ -63,7 +70,11 @@ class PdfWriter(private val out: OutputStream) {
         obj(pagesId, "<< /Type /Pages /Kids [${ids.joinToString(" ") { "${it.first} 0 R" }}] /Count ${pages.size} >>")
         obj(font, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
         val date = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())
-        obj(info, "<< /Title ${utf16Hex(title)} /Producer (SmartScan) /Creator (SmartScan) /CreationDate (D:$date) >>")
+        val extra = StringBuilder()
+        if (meta.subject.isNotBlank()) extra.append(" /Subject ${utf16Hex(meta.subject)}")
+        if (meta.keywords.isNotBlank()) extra.append(" /Keywords ${utf16Hex(meta.keywords)}")
+        meta.custom.forEach { (k, v) -> if (v.isNotBlank()) extra.append(" /$k ${utf16Hex(v)}") }
+        obj(info, "<< /Title ${utf16Hex(title)}$extra /Producer (SmartScan) /Creator (SmartScan) /CreationDate (D:$date) >>")
 
         pages.forEachIndexed { i, page ->
             val (pageId, imgId, contentId) = ids[i]
@@ -105,11 +116,22 @@ class PdfWriter(private val out: OutputStream) {
             }
             stream(contentId, "/Filter /FlateDecode", deflate(sb.toString().toByteArray(Charsets.ISO_8859_1)))
 
+            // Page metadata as a sticky-note annotation (not printed): shown by every PDF viewer.
+            val annots = page.note?.takeIf { it.isNotBlank() }?.let { note ->
+                val a = newId()
+                obj(
+                    a,
+                    "<< /Type /Annot /Subtype /Text /Rect [8 ${f(ph - 28)} 28 ${f(ph - 8)}] /Contents ${utf16Hex(note)} " +
+                        "/T ${utf16Hex("SmartScan")} /Name /Comment /Open false /F 0 >>"
+                )
+                " /Annots [$a 0 R]"
+            } ?: ""
+
             obj(
                 pageId,
                 "<< /Type /Page /Parent $pagesId 0 R /MediaBox [0 0 ${f(pw)} ${f(ph)}] " +
                     "/Resources << /XObject << /Im0 $imgId 0 R >> /Font << /F1 $font 0 R >> >> " +
-                    "/Contents $contentId 0 R >>"
+                    "/Contents $contentId 0 R$annots >>"
             )
         }
 

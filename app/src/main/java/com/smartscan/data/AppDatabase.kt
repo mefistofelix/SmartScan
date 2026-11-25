@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DocumentEntity::class, PageEntity::class, TaxonomyNode::class, DocNodeRef::class,
         EndpointEntity::class, UploadEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,12 +25,21 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "smartscan.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE documents ADD COLUMN output TEXT NOT NULL DEFAULT 'PDF'")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pages ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pages ADD COLUMN lat REAL")
+                db.execSQL("ALTER TABLE pages ADD COLUMN lon REAL")
+                db.execSQL("ALTER TABLE pages ADD COLUMN codes TEXT NOT NULL DEFAULT '[]'")
             }
         }
     }

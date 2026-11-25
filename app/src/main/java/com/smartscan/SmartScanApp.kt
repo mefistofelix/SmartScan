@@ -40,6 +40,7 @@ class AppContainer(context: Context) {
     val settings = AppSettings(context)
     val repo = Repository(context, db)
     val ocr by lazy { OcrEngine() }
+    val codes by lazy { com.smartscan.ocr.CodeReader() }
     val exporter by lazy { Exporter(context, repo, settings) }
     val http: OkHttpClient by lazy {
         OkHttpClient.Builder()

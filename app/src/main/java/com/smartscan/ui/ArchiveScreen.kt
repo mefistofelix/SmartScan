@@ -1,7 +1,11 @@
 package com.smartscan.ui
 
 import android.app.Application
-import androidx.compose.foundation.clickable
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +21,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
@@ -27,6 +34,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -40,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,10 +69,13 @@ import com.smartscan.data.TaxonomyNode
 import com.smartscan.data.UploadEntity
 import com.smartscan.data.UploadStatus
 import com.smartscan.voice.normalizeText
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class ArchiveItem(val row: DocListRow, val nodes: List<TaxonomyNode>, val uploads: List<UploadEntity>)
 
@@ -105,6 +117,33 @@ class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
                 })
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- multi-selection -> one ZIP ----
+    val selected = MutableStateFlow<Set<Long>>(emptySet())
+    val zipping = MutableStateFlow(false)
+    val shares = MutableSharedFlow<Intent>(extraBufferCapacity = 2)
+    val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    fun toggleSelect(id: Long) = selected.update { if (id in it) it - id else it + id }
+    fun selectAll() = selected.update { s -> items.value.map { it.row.doc.id }.toSet().let { all -> if (s == all) emptySet() else all } }
+    fun clearSelection() { selected.value = emptySet() }
+
+    fun shareZip() {
+        val ids = items.value.map { it.row.doc.id }.filter { it in selected.value }
+        if (ids.isEmpty() || zipping.value) return
+        zipping.value = true
+        viewModelScope.launch {
+            try {
+                val zip = c.exporter.exportZip(ids)
+                shares.emit(c.exporter.shareIntent(listOf(zip), "application/zip"))
+                selected.value = emptySet()
+            } catch (e: Exception) {
+                messages.emit("Errore ZIP: ${e.message}")
+            } finally {
+                zipping.value = false
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,10 +163,23 @@ fun ArchiveScreen(
     val nodes by vm.nodes.collectAsStateWithLifecycle()
     val endpoints by vm.endpoints.collectAsStateWithLifecycle()
     var picker by remember { mutableStateOf(false) }
+    val selected by vm.selected.collectAsStateWithLifecycle()
+    val zipping by vm.zipping.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val selecting = selected.isNotEmpty()
+    LaunchedEffect(Unit) { vm.shares.collect { context.startActivity(it) } }
+    LaunchedEffect(Unit) { vm.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() } }
+    BackHandler(enabled = selecting) { vm.clearSelection() }
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            if (selecting) TopAppBar(
+                title = { Text("${selected.size} selezionati") },
+                navigationIcon = { IconButton(onClick = { vm.clearSelection() }) { Icon(Icons.Filled.Close, "Annulla selezione") } },
+                actions = {
+                    IconButton(onClick = { vm.selectAll() }) { Icon(Icons.Filled.SelectAll, "Seleziona tutti") }
+                },
+            ) else TopAppBar(
                 title = { Text("SmartScan") },
                 actions = {
                     IconButton(onClick = onTaxonomy) { Icon(Icons.Filled.AccountTree, "Categorie e tag") }
@@ -137,7 +189,14 @@ fun ArchiveScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            if (selecting) ExtendedFloatingActionButton(
+                onClick = { vm.shareZip() },
+                icon = {
+                    if (zipping) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Filled.FolderZip, null)
+                },
+                text = { Text(if (zipping) "Creo lo ZIP…" else "Condividi ZIP (${selected.size})") },
+            ) else ExtendedFloatingActionButton(
                 onClick = onScan,
                 icon = { Icon(Icons.Filled.DocumentScanner, null) },
                 text = { Text("Scansiona") },
@@ -172,7 +231,12 @@ fun ArchiveScreen(
                 }
             } else LazyColumn(contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(items, key = { it.row.doc.id }) { item ->
-                    DocCard(item) { onOpen(item.row.doc.id, item.row.doc.status == DocStatus.DRAFT) }
+                    val id = item.row.doc.id
+                    DocCard(
+                        item, selected = id in selected,
+                        onClick = { if (selecting) vm.toggleSelect(id) else onOpen(id, item.row.doc.status == DocStatus.DRAFT) },
+                        onLongClick = { vm.toggleSelect(id) },
+                    )
                 }
             }
         }
@@ -185,12 +249,23 @@ fun ArchiveScreen(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DocCard(item: ArchiveItem, onClick: () -> Unit) {
+private fun DocCard(item: ArchiveItem, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val d = item.row.doc
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(
+        Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        colors = if (selected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        else CardDefaults.cardColors(),
+    ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            item.row.thumb?.let { Thumb(it, Modifier.size(56.dp, 74.dp)) }
+            Box {
+                item.row.thumb?.let { Thumb(it, Modifier.size(56.dp, 74.dp)) }
+                if (selected) Icon(
+                    Icons.Filled.CheckCircle, "Selezionato", tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.TopStart).padding(2.dp),
+                )
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(d.title.ifBlank { "Bozza" }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)

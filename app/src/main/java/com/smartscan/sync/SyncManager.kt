@@ -101,7 +101,7 @@ class SyncManager(
     suspend fun upload(docId: Long, endpointId: Long): String? = withContext(Dispatchers.IO) {
         val ep = repo.endpoint(endpointId) ?: throw IllegalStateException("Endpoint rimosso")
         val doc = repo.getDoc(docId) ?: throw IllegalStateException("Documento rimosso")
-        if (repo.pages(docId).any { it.ocrText == null }) repo.runOcr(docId, context.container.ocr)
+        if (repo.pages(docId).any { it.ocrText == null }) repo.runOcr(docId, context.container.ocr, context.container.codes)
         val dir = File(context.cacheDir, "upload/$docId-$endpointId").apply { deleteRecursively(); mkdirs() }
         try {
             val fmt = effectiveFormat(doc.output, ep.format)
@@ -194,6 +194,25 @@ class SyncManager(
             putJsonArray("tags") { assigned.filter { it.kind == NodeKind.TAG }.forEach { add(node(it)) } }
             putJsonArray("files") { fileNames.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
             put("ocrText", doc.ocrText)
+            // Added in 0.3: per-page note, capture position and decoded QR codes / barcodes.
+            val metas = repo.pages(doc.id).map { com.smartscan.export.PageMeta.of(it) }
+            putJsonArray("pageInfo") {
+                metas.forEachIndexed { i, m ->
+                    add(buildJsonObject {
+                        put("page", i + 1)
+                        if (m.note.isNotBlank()) put("note", m.note)
+                        if (m.lat != null && m.lon != null) {
+                            put("lat", m.lat)
+                            put("lon", m.lon)
+                        }
+                        putJsonArray("codes") {
+                            m.codes.forEach { code ->
+                                add(buildJsonObject { put("format", code.format); put("value", code.value) })
+                            }
+                        }
+                    })
+                }
+            }
         }
     }
 
@@ -274,7 +293,7 @@ class OcrWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, p
         val docId = inputData.getLong(SyncManager.KEY_DOC, -1)
         if (docId < 0) return Result.failure()
         val c = applicationContext.container
-        runCatching { c.repo.runOcr(docId, c.ocr) }
+        runCatching { c.repo.runOcr(docId, c.ocr, c.codes) }
         return Result.success()
     }
 }

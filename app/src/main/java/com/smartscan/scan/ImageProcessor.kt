@@ -24,10 +24,15 @@ import kotlin.math.roundToInt
 object ImageProcessor {
     const val ORIGINAL_MAX_SIDE = 4000
     const val STORE_MAX_SIDE = 3300
+    /** «Qualità max»: originals and pages keep (almost) the full sensor resolution. */
+    const val HQ_ORIGINAL_MAX_SIDE = 8200
+    const val HQ_STORE_MAX_SIDE = 6000
+    const val HQ_EXPORT_MAX_SIDE = 6000
+    const val HQ_JPEG_QUALITY = 95
     private const val READ_FLAGS = Imgcodecs.IMREAD_COLOR or Imgcodecs.IMREAD_IGNORE_ORIENTATION
 
     /** Applies EXIF orientation and caps resolution so the rest of the pipeline sees upright pixels. */
-    fun normalizeCapture(src: File, dst: File) {
+    fun normalizeCapture(src: File, dst: File, hq: Boolean = false) {
         val orientation = runCatching {
             ExifInterface(src.absolutePath).getAttributeInt(
                 ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
@@ -44,8 +49,8 @@ object ImageProcessor {
         if (code >= 0) {
             val r = Mat(); Core.rotate(m, r, code); m.release(); m = r
         }
-        m = limit(m, ORIGINAL_MAX_SIDE)
-        Imgcodecs.imwrite(dst.absolutePath, m, MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 94))
+        m = limit(m, if (hq) HQ_ORIGINAL_MAX_SIDE else ORIGINAL_MAX_SIDE)
+        Imgcodecs.imwrite(dst.absolutePath, m, MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, if (hq) 97 else 94))
         m.release()
     }
 
@@ -64,11 +69,12 @@ object ImageProcessor {
 
     /** Renders [page] into a new file in [dir] and returns its path. */
     fun renderPage(page: PageEntity, dir: File, deskew: Boolean): String {
-        val m = render(page.originalPath, Corners.parse(page.corners), page.margin, page.filter, page.rotation, deskew)
+        val hq = isHighQuality(page.originalPath)
+        val m = render(page.originalPath, Corners.parse(page.corners), page.margin, page.filter, page.rotation, deskew, hq)
         val bw = page.filter == PageFilter.BW
         val out = File(dir, "p_${page.id}_${System.nanoTime()}." + if (bw) "png" else "jpg")
         val params = if (bw) MatOfInt(Imgcodecs.IMWRITE_PNG_BILEVEL, 1)
-        else MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 90)
+        else MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, if (hq) HQ_JPEG_QUALITY else 90)
         Imgcodecs.imwrite(out.absolutePath, m, params)
         m.release()
         return out.absolutePath
@@ -76,7 +82,7 @@ object ImageProcessor {
 
     fun render(
         originalPath: String, corners: FloatArray, margin: Float, filter: PageFilter,
-        rotation: Int, deskew: Boolean,
+        rotation: Int, deskew: Boolean, hq: Boolean = false,
     ): Mat {
         val src = Imgcodecs.imread(originalPath, READ_FLAGS)
         require(!src.empty()) { "Originale mancante" }
@@ -95,10 +101,20 @@ object ImageProcessor {
             )
             m.release(); m = r
         }
-        m = limit(m, STORE_MAX_SIDE)
+        m = limit(m, if (hq) HQ_STORE_MAX_SIDE else STORE_MAX_SIDE)
         val out = applyFilter(m, filter)
         if (out !== m) m.release()
         return out
+    }
+
+    /**
+     * A page was captured with «Qualità max» when its original is larger than the normal cap.
+     * Derived from the file, so re-renders and exports keep the quality without a schema change.
+     */
+    fun isHighQuality(path: String): Boolean {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(path, o)
+        return max(o.outWidth, o.outHeight) > ORIGINAL_MAX_SIDE
     }
 
     fun limit(m: Mat, maxSide: Int): Mat {

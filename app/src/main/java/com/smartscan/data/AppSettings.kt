@@ -33,6 +33,18 @@ class AppSettings(context: Context) {
         get() = bool("autoCapture", true); set(v) = setBool("autoCapture", v)
     var autoDeskew: Boolean
         get() = bool("autoDeskew", true); set(v) = setBool("autoDeskew", v)
+    /** Live edge detection in the scanner. Off: the whole frame is the page, manual shutter only. */
+    var edgeDetect: Boolean
+        get() = bool("edgeDetect", true); set(v) = setBool("edgeDetect", v)
+    /** Maximum quality: full sensor resolution, low JPEG compression, no downscaling on export. */
+    var maxQuality: Boolean
+        get() = bool("maxQuality", false); set(v) = setBool("maxQuality", v)
+    /** Save the capture position with each page (EXIF GPS, PDF and upload metadata). */
+    var geoTag: Boolean
+        get() = bool("geoTag", false); set(v) = setBool("geoTag", v)
+    /** Open the camera right away when the app starts (the archive stays below it). */
+    var startInScanner: Boolean
+        get() = bool("startInScanner", true); set(v) = setBool("startInScanner", v)
     var voiceCommands: Boolean
         get() = bool("voiceCommands", false); set(v) = setBool("voiceCommands", v)
     var voiceMetaPre: Boolean

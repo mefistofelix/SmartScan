@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -118,6 +120,11 @@ class DocumentViewModel(app: Application, val docId: Long) : AndroidViewModel(ap
         messages.emit("PDF salvato (${f.length() / 1024} KB)")
     }
 
+    fun rename(title: String) = viewModelScope.launch {
+        val t = title.trim()
+        if (t.isNotEmpty()) c.repo.getDoc(docId)?.let { c.repo.updateDoc(it.copy(title = t)) }
+    }
+
     fun upload(endpointId: Long) = viewModelScope.launch { c.sync.enqueueUpload(docId, endpointId) }
     fun delete(onDone: () -> Unit) = viewModelScope.launch { c.repo.deleteDoc(docId); onDone() }
 }
@@ -137,6 +144,7 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     var confirmDelete by remember { mutableStateOf(false) }
     var showOcr by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         uri?.let { vm.savePdfTo(it) }
     }
@@ -145,7 +153,12 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(doc?.title ?: "", maxLines = 1) },
+            title = {
+                Text(
+                    doc?.title ?: "", maxLines = 1,
+                    modifier = Modifier.clickable(enabled = doc != null) { renaming = true },
+                )
+            },
             navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
             actions = {
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Modifica") }
@@ -225,6 +238,19 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (renaming) {
+        var name by remember { mutableStateOf(doc?.title.orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Nome documento") },
+            text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true) },
+            confirmButton = {
+                TextButton(onClick = { vm.rename(name); renaming = false }, enabled = name.isNotBlank()) { Text("Salva") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Annulla") } },
+        )
     }
 
     if (confirmDelete) AlertDialog(

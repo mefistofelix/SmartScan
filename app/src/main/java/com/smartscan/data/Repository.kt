@@ -2,6 +2,7 @@ package com.smartscan.data
 
 import android.content.Context
 import androidx.room.withTransaction
+import com.smartscan.ocr.CodeReader
 import com.smartscan.ocr.OcrEngine
 import com.smartscan.scan.Corners
 import com.smartscan.scan.ImageProcessor
@@ -60,19 +61,22 @@ class Repository(private val context: Context, val db: AppDatabase) {
 
     suspend fun addCapturedPage(
         docId: Long, raw: File, hint: FloatArray?, filter: PageFilter, deskew: Boolean,
+        detect: Boolean = true, hq: Boolean = false, lat: Double? = null, lon: Double? = null,
     ): PageEntity = renderMutex.withLock {
         withContext(Dispatchers.Default) {
             val dir = docDir(docId)
             val orig = File(dir, "orig_${System.currentTimeMillis()}.jpg")
-            ImageProcessor.normalizeCapture(raw, orig)
+            ImageProcessor.normalizeCapture(raw, orig, hq)
             raw.delete()
-            val corners = ImageProcessor.detectCorners(orig.absolutePath)
+            val corners = if (!detect) Corners.FULL
+            else ImageProcessor.detectCorners(orig.absolutePath)
                 ?: hint?.takeIf { Corners.area(it) > 0.1f }
                 ?: Corners.FULL
             val pos = (pagesDao.maxPosition(docId) ?: -1) + 1
             val draft = PageEntity(
                 docId = docId, position = pos, originalPath = orig.absolutePath, processedPath = "",
                 corners = Corners.format(corners), filter = filter,
+                lat = lat, lon = lon,
             )
             val id = pagesDao.insert(draft)
             val withId = draft.copy(id = id)
@@ -87,8 +91,11 @@ class Repository(private val context: Context, val db: AppDatabase) {
     suspend fun rerender(page: PageEntity, deskew: Boolean): PageEntity = renderMutex.withLock {
         withContext(Dispatchers.Default) {
             val newPath = ImageProcessor.renderPage(page, docDir(page.docId), deskew)
-            val old = pagesDao.get(page.id)?.processedPath
-            val upd = page.copy(processedPath = newPath, ocrText = null, ocrLines = "[]")
+            val cur = pagesDao.get(page.id)
+            val old = cur?.processedPath
+            val upd = page.copy(
+                processedPath = newPath, ocrText = null, ocrLines = "[]", codes = "[]", note = cur?.note ?: page.note,
+            )
             pagesDao.update(upd)
             if (old != null && old != newPath) File(old).delete()
             upd
@@ -113,18 +120,21 @@ class Repository(private val context: Context, val db: AppDatabase) {
         pagesDao.updateAll(list.mapIndexed { k, it -> it.copy(position = k) })
     }
 
-    suspend fun runOcr(docId: Long, engine: OcrEngine) {
+    suspend fun runOcr(docId: Long, engine: OcrEngine, codeReader: CodeReader? = null) {
         for (p in pagesDao.list(docId)) {
             if (p.ocrText != null) continue
-            val upd = try {
+            val result = try {
                 val (text, lines) = engine.recognize(p.processedPath)
-                p.copy(ocrText = text, ocrLines = Json.encodeToString(lines))
+                val codes = runCatching { codeReader?.read(p.originalPath, p.processedPath) }.getOrNull().orEmpty()
+                Triple(text, Json.encodeToString(lines), Json.encodeToString(codes))
             } catch (e: Exception) {
-                p.copy(ocrText = "")
+                Triple("", "[]", "[]")
             }
-            // Skip if the page was re-rendered meanwhile.
+            // Skip if the page was re-rendered meanwhile; keep fields changed meanwhile (notes).
             val current = pagesDao.get(p.id) ?: continue
-            if (current.processedPath == p.processedPath) pagesDao.update(upd)
+            if (current.processedPath == p.processedPath) pagesDao.update(
+                current.copy(ocrText = result.first, ocrLines = result.second, codes = result.third)
+            )
         }
         val all = pagesDao.list(docId).joinToString("\n\n") { it.ocrText.orEmpty() }.trim()
         docs.get(docId)?.let { docs.update(it.copy(ocrText = all, status = DocStatus.READY)) }
@@ -151,6 +161,38 @@ class Repository(private val context: Context, val db: AppDatabase) {
         tax.insertRefs(ids.map { DocNodeRef(docId, it) })
 
     /** Parses a spoken phrase and applies title / notes / date / categories / tags to [docId]. */
+    /**
+     * Appends a dictated note to the document notes (one line per dictation) and, when [pageId] is
+     * given, to that page's own note. While the document has
+     * no title yet, the first words of the note become its title.
+     */
+    suspend fun appendNote(docId: Long, text: String, pageId: Long? = null): DocumentEntity? {
+        val doc = docs.get(docId) ?: return null
+        val t = text.trim().replaceFirstChar { it.uppercase() }
+        if (t.isEmpty()) return doc
+        pageId?.let { pagesDao.get(it) }?.let { p ->
+            pagesDao.update(p.copy(note = if (p.note.isBlank()) t else p.note + "
+" + t))
+        }
+        val upd = doc.copy(
+            title = doc.title.ifBlank { titleFrom(t) },
+            notes = if (doc.notes.isBlank()) t else doc.notes + "\n" + t,
+        )
+        updateDoc(upd)
+        return upd
+    }
+
+    private fun titleFrom(note: String): String {
+        val words = note.split(Regex("\\s+")).take(8)
+        val sb = StringBuilder()
+        for (w in words) {
+            if (sb.isNotEmpty() && sb.length + 1 + w.length > 50) break
+            if (sb.isNotEmpty()) sb.append(' ')
+            sb.append(w)
+        }
+        return sb.toString().take(50).trimEnd(',', '.', ';', ':')
+    }
+
     suspend fun applyVoiceMetadata(docId: Long, text: String, createTags: Boolean): ParsedMetadata {
         val parsed = MetadataParser.parse(text, tax.all())
         val doc = docs.get(docId) ?: return parsed

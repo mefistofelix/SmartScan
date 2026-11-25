@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.exifinterface.media.ExifInterface
 import com.smartscan.data.AppSettings
+import com.smartscan.data.DocOutput
+import com.smartscan.data.DocStatus
 import com.smartscan.data.DocumentEntity
+import com.smartscan.data.ExportQuality
+import com.smartscan.data.PageEntity
 import com.smartscan.data.PageFilter
 import com.smartscan.data.Repository
 import com.smartscan.ocr.OcrLine
@@ -18,6 +23,11 @@ import org.opencv.core.MatOfByte
 import org.opencv.core.MatOfInt
 import org.opencv.imgcodecs.Imgcodecs
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 /** Builds PDF / image / text exports with size optimization driven by [AppSettings.quality]. */
 class Exporter(
@@ -35,13 +45,15 @@ class Exporter(
             val pages = repo.pages(docId)
             require(pages.isNotEmpty()) { "Il documento non ha pagine" }
             val q = settings.quality
-            val pdfPages = pages.map { p ->
+            val meta = docMeta(doc, pages)
+            val pdfPages = pages.mapIndexed { i, p ->
                 val ocr = if (withOcr) runCatching { json.decodeFromString<List<OcrLine>>(p.ocrLines) }.getOrNull() else null
-                PdfPage(encode(p.processedPath, p.filter == PageFilter.BW, q.maxSide, q.jpegQuality), ocr)
+                val (side, jq) = limits(p.originalPath, q)
+                PdfPage(encode(p.processedPath, p.filter == PageFilter.BW, side, jq), ocr, meta.pages[i].text())
             }
             outDir.mkdirs()
             val file = File(outDir, fileBase(doc) + ".pdf")
-            file.outputStream().buffered().use { PdfWriter(it).write(pdfPages, displayTitle(doc), settings.pageSize) }
+            file.outputStream().buffered().use { PdfWriter(it).write(pdfPages, displayTitle(doc), settings.pageSize, pdfInfo(meta)) }
             file
         }
 
@@ -50,14 +62,18 @@ class Exporter(
             val doc = requireNotNull(repo.getDoc(docId)) { "Documento non trovato" }
             val q = settings.quality
             outDir.mkdirs()
-            repo.pages(docId).mapIndexed { i, p ->
-                val m = ImageProcessor.readForExport(p.processedPath, q.maxSide)
+            val pages = repo.pages(docId)
+            val meta = docMeta(doc, pages)
+            pages.mapIndexed { i, p ->
+                val (side, jq) = limits(p.originalPath, q)
+                val m = ImageProcessor.readForExport(p.processedPath, side)
                 val bw = p.filter == PageFilter.BW
                 val f = File(outDir, "${fileBase(doc)}_p${i + 1}." + if (bw) "png" else "jpg")
                 val params = if (bw) MatOfInt(Imgcodecs.IMWRITE_PNG_BILEVEL, 1)
-                else MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, q.jpegQuality)
+                else MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, jq)
                 Imgcodecs.imwrite(f.absolutePath, m, params)
                 m.release()
+                writeImageMeta(f, meta, meta.pages[i])
                 f
             }
         }
@@ -68,6 +84,90 @@ class Exporter(
             .joinToString("\n\n")
         outDir.mkdirs()
         File(outDir, fileBase(doc) + ".txt").apply { writeText(text) }
+    }
+
+    private suspend fun docMeta(doc: DocumentEntity, pages: List<PageEntity>): DocMeta {
+        val byId = repo.nodes().associateBy { it.id }
+        val names = repo.docNodeIds(doc.id).mapNotNull { byId[it]?.name }
+        return DocMeta(doc, names, pages.map { PageMeta.of(it) })
+    }
+
+    /** Title, notes (Subject), categories and tags (Keywords), decoded codes and capture position. */
+    private fun pdfInfo(m: DocMeta): PdfInfo {
+        val first = m.pages.firstOrNull { it.lat != null }
+        return PdfInfo(
+            subject = m.doc.notes,
+            keywords = m.keywords.joinToString("; "),
+            custom = buildMap {
+                if (m.allCodes.isNotEmpty()) put("SmartScanCodes", m.allCodes.joinToString("
+") { it.format + ": " + it.value })
+                if (first?.lat != null && first.lon != null) put("SmartScanGPS", PageMeta.coord(first.lat) + "," + PageMeta.coord(first.lon))
+                m.doc.docDate?.let { put("SmartScanDate", it) }
+            },
+        )
+    }
+
+    /**
+     * EXIF + XMP on an exported image: description (title and page note), full notes, tags, codes and GPS.
+     * EXIF text is ASCII only, so the complete UTF-8 text goes into the XMP packet as well.
+     */
+    private fun writeImageMeta(f: File, m: DocMeta, page: PageMeta) {
+        runCatching {
+            val exif = ExifInterface(f.absolutePath)
+            val desc = listOf(m.title, page.text()).filter { it.isNotBlank() }.joinToString("
+")
+            exif.setAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION, Xmp.ascii(desc))
+            if (m.doc.notes.isNotBlank()) exif.setAttribute(ExifInterface.TAG_USER_COMMENT, Xmp.ascii(m.doc.notes))
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "SmartScan")
+            if (page.lat != null && page.lon != null) exif.setLatLong(page.lat, page.lon)
+            val description = listOf(m.doc.notes, page.text()).filter { it.isNotBlank() }.joinToString("
+")
+            exif.setAttribute(ExifInterface.TAG_XMP, Xmp.build(m.title, description, m.keywords, page))
+            exif.saveAttributes()
+        }.onFailure { android.util.Log.w("Exporter", "metadata ${f.name}", it) }
+    }
+
+    /** Pages captured with «Qualità max» skip the export downscaling and keep low compression. */
+    private fun limits(originalPath: String, q: ExportQuality): Pair<Int, Int> =
+        if (ImageProcessor.isHighQuality(originalPath)) ImageProcessor.HQ_EXPORT_MAX_SIDE to ImageProcessor.HQ_JPEG_QUALITY
+        else q.maxSide to q.jpegQuality
+
+    /**
+     * One ZIP with several documents, each in its own output format: searchable PDF (plain PDF while
+     * OCR is pending) or a folder of images.
+     */
+    suspend fun exportZip(docIds: List<Long>): File = withContext(Dispatchers.IO) {
+        require(docIds.isNotEmpty()) { "Nessun documento selezionato" }
+        val work = File(exportsDir(), "zip_${System.nanoTime()}").apply { mkdirs() }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.ITALY).format(Date())
+        val zip = File(exportsDir(), "SmartScan_${docIds.size}doc_$stamp.zip")
+        try {
+            val used = HashSet<String>()
+            ZipOutputStream(zip.outputStream().buffered()).use { out ->
+                for (id in docIds) {
+                    val doc = repo.getDoc(id) ?: continue
+                    if (repo.pageCount(id) == 0) continue
+                    val dir = File(work, id.toString()).apply { mkdirs() }
+                    var base = fileBase(doc)
+                    while (!used.add(base)) base += "_"
+                    if (doc.output == DocOutput.IMAGES) {
+                        exportImages(id, dir).forEach { addEntry(out, "$base/${it.name}", it) }
+                    } else {
+                        val pdf = exportPdf(id, doc.status == DocStatus.READY, dir)
+                        addEntry(out, "$base.pdf", pdf)
+                    }
+                }
+            }
+        } finally {
+            work.deleteRecursively()
+        }
+        zip
+    }
+
+    private fun addEntry(out: ZipOutputStream, name: String, file: File) {
+        out.putNextEntry(ZipEntry(name))
+        file.inputStream().use { it.copyTo(out) }
+        out.closeEntry()
     }
 
     private fun encode(path: String, bw: Boolean, maxSide: Int, quality: Int): EncodedImage {

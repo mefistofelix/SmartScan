@@ -52,8 +52,14 @@ app/src/main/java/com/smartscan/
 - Scanner flow is continuous: no single/multi mode. «Fine» (`ScannerViewModel.finishDocument`) saves the draft
   and scanning goes on into a new draft. Closing the scanner saves pending pages. `DocumentEntity.output`
   (PDF/IMAGES, picked in the scanner) overrides the endpoint format in uploads (`SyncManager.effectiveFormat`).
-- Room schema changes need a `Migration` in `AppDatabase` (current version 2). Never use destructive migration.
+- Room schema changes need a `Migration` in `AppDatabase` (current version 3). Never use destructive migration.
   `SyncManager.enqueueFinalize` chains OCR and then the auto-uploads (unique work `finalize-<docId>`).
+- Scanner quick toggles (HQ, Bordi, Raddrizza, GPS) persist in `AppSettings`. HQ pages are recognized by their
+  original size (`ImageProcessor.isHighQuality`), so re-renders and exports keep the quality without a schema field.
+  The light is a torch (`enableTorch`, re-applied on camera open and after each capture), never the capture flash.
+- Per-page metadata (`PageEntity.note`, `lat`/`lon`, `codes`) is written into exports by `Exporter`
+  (PDF Info + page annotation, EXIF + XMP) and into the upload JSON `pageInfo`. Codes are decoded with the OCR
+  (`ocr/CodeReader`), and `Repository.rerender` resets them.
 - The endpoint protocol (QR JSON, multipart fields, metadata schema `smartscan/1`, taxonomy JSON) is
   documented in README.md. If you change it, update README in the same change and keep it backward
   compatible (`ignoreUnknownKeys`).
