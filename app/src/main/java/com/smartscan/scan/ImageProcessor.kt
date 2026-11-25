@@ -1,5 +1,9 @@
 package com.smartscan.scan
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import androidx.exifinterface.media.ExifInterface
 import com.smartscan.data.PageEntity
 import com.smartscan.data.PageFilter
@@ -40,7 +44,7 @@ object ImageProcessor {
             )
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
         var m = Imgcodecs.imread(src.absolutePath, READ_FLAGS)
-        require(!m.empty()) { "Immagine non leggibile" }
+        require(!m.empty()) { str(R.string.err_image_unreadable) }
         val code = when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> Core.ROTATE_90_CLOCKWISE
             ExifInterface.ORIENTATION_ROTATE_180 -> Core.ROTATE_180
@@ -85,7 +89,7 @@ object ImageProcessor {
         rotation: Int, deskew: Boolean, hq: Boolean = false,
     ): Mat {
         val src = Imgcodecs.imread(originalPath, READ_FLAGS)
-        require(!src.empty()) { "Originale mancante" }
+        require(!src.empty()) { str(R.string.err_original_missing) }
         val c = Corners.expand(corners, margin)
         var m = if (Corners.isFull(c)) src else warp(src, c).also { src.release() }
         if (deskew) m = deskew(m)
@@ -277,7 +281,7 @@ object ImageProcessor {
     /** Reads a processed page for export, resized to [maxSide]. Returns 1 or 3 channel Mat. */
     fun readForExport(path: String, maxSide: Int): Mat {
         var m = Imgcodecs.imread(path, Imgcodecs.IMREAD_UNCHANGED)
-        require(!m.empty()) { "Pagina mancante: $path" }
+        require(!m.empty()) { str(R.string.err_page_missing, path) }
         if (m.channels() == 4) {
             val r = Mat(); Imgproc.cvtColor(m, r, Imgproc.COLOR_BGRA2BGR); m.release(); m = r
         }

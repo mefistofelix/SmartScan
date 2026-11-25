@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,7 +95,7 @@ fun flattenTree(nodes: List<TaxonomyNode>, expanded: Set<Long>, filter: String =
 /** Groups nodes by source: local first, then each endpoint. */
 fun sourceGroups(nodes: List<TaxonomyNode>, endpoints: List<EndpointEntity>): List<Pair<String, List<TaxonomyNode>>> {
     val out = ArrayList<Pair<String, List<TaxonomyNode>>>()
-    out += "Locale" to nodes.filter { it.endpointId == null }
+    out += str(R.string.source_local) to nodes.filter { it.endpointId == null }
     endpoints.forEach { ep ->
         val list = nodes.filter { it.endpointId == ep.id }
         if (list.isNotEmpty()) out += ep.name to list
@@ -131,7 +135,7 @@ fun TreePickerDialog(
     endpoints: List<EndpointEntity>,
     initial: Set<Long>,
     single: Boolean = false,
-    title: String = "Categorie e tag",
+    title: String = str(R.string.categories_tags),
     onCreate: ((NodeKind, String) -> Unit)? = null,
     onDismiss: () -> Unit,
     onConfirm: (Set<Long>) -> Unit,
@@ -159,7 +163,7 @@ fun TreePickerDialog(
                 OutlinedTextField(
                     value = query, onValueChange = { query = it },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
-                    placeholder = { Text("Cerca o crea…") }, singleLine = true,
+                    placeholder = { Text(str(R.string.search_or_create)) }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                 )
                 LazyColumn(Modifier.weight(1f)) {
@@ -196,12 +200,12 @@ fun TreePickerDialog(
                     ) {
                         TextButton(onClick = { onCreate(kind, query.trim()); query = "" }) {
                             Icon(Icons.Filled.Add, null); Spacer(Modifier.width(4.dp))
-                            Text("Crea \"${query.trim()}\"", maxLines = 1)
+                            Text(str(R.string.create_quoted, query.trim()), maxLines = 1)
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    if (single) TextButton(onClick = { onConfirm(emptySet()) }) { Text("Tutti") }
-                    TextButton(onClick = onDismiss) { Text("Annulla") }
+                    if (single) TextButton(onClick = { onConfirm(emptySet()) }) { Text(str(R.string.all)) }
+                    TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) }
                     TextButton(onClick = { onConfirm(selected) }) { Text("OK") }
                 }
             }

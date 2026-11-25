@@ -1,14 +1,23 @@
 package com.smartscan.data
 
+import com.smartscan.R
+import com.smartscan.str
+
 import android.content.Context
 
-enum class ExportQuality(val label: String, val maxSide: Int, val jpegQuality: Int) {
-    HIGH("Alta (~300 dpi)", 3300, 88),
-    MEDIUM("Media (~200 dpi)", 2340, 75),
-    LOW("Compatta (~140 dpi)", 1650, 60),
+enum class ExportQuality(private val res: Int, val maxSide: Int, val jpegQuality: Int) {
+    HIGH(R.string.quality_high, 3300, 88),
+    MEDIUM(R.string.quality_medium, 2340, 75),
+    LOW(R.string.quality_low, 1650, 60);
+
+    val label: String get() = str(res)
 }
 
-enum class PdfPageSize(val label: String) { AUTO("Adatta all'immagine"), A4("A4"), LETTER("Letter") }
+enum class PdfPageSize(private val res: Int) {
+    AUTO(R.string.page_auto), A4(R.string.page_a4), LETTER(R.string.page_letter);
+
+    val label: String get() = str(res)
+}
 
 class AppSettings(context: Context) {
     private val p = context.getSharedPreferences("settings", Context.MODE_PRIVATE)

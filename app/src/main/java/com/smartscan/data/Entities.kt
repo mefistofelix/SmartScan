@@ -1,5 +1,8 @@
 package com.smartscan.data
 
+import com.smartscan.R
+import com.smartscan.str
+
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -8,20 +11,34 @@ import androidx.room.PrimaryKey
 
 enum class DocStatus { DRAFT, PROCESSING, READY }
 
-enum class PageFilter(val label: String) {
-    ORIGINAL("Originale"), ENHANCED("Migliorato"), GRAY("Grigi"), BW("B/N")
+enum class PageFilter(private val res: Int) {
+    ORIGINAL(R.string.filter_original), ENHANCED(R.string.filter_enhanced), GRAY(R.string.filter_gray), BW(R.string.filter_bw);
+
+    val label: String get() = str(res)
 }
 
-enum class NodeKind(val label: String) { CATEGORY("Categorie"), TAG("Tag") }
+enum class NodeKind(private val res: Int) {
+    CATEGORY(R.string.kind_categories), TAG(R.string.kind_tags);
+
+    val label: String get() = str(res)
+}
 
 enum class EndpointType { HTTP, WEBDAV }
 
-enum class UploadFormat(val label: String) { PDF("PDF"), PDF_OCR("PDF ricercabile"), IMAGES("Immagini") }
+enum class UploadFormat(private val res: Int) {
+    PDF(R.string.format_pdf), PDF_OCR(R.string.format_pdf_ocr), IMAGES(R.string.format_images);
+
+    val label: String get() = str(res)
+}
 
 enum class UploadStatus { QUEUED, RUNNING, DONE, FAILED }
 
 /** What a document becomes when it is saved and sent: chosen in the scanner before «Fine». */
-enum class DocOutput(val label: String) { PDF("PDF"), IMAGES("Immagini") }
+enum class DocOutput(private val res: Int) {
+    PDF(R.string.format_pdf), IMAGES(R.string.format_images);
+
+    val label: String get() = str(res)
+}
 
 @Entity(tableName = "documents")
 data class DocumentEntity(

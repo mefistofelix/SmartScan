@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -41,30 +45,30 @@ fun SettingsScreen(onClose: () -> Unit) {
     val s = LocalContext.current.container.settings
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text("Impostazioni") },
-            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
+            title = { Text(str(R.string.settings)) },
+            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
         )
     }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState())) {
-            Section("Scansione")
-            Toggle("Scatto automatico", "Scatta quando il documento è fermo e a fuoco", s.autoCapture) { s.autoCapture = it }
-            Toggle("Raddrizzamento automatico", "Corregge l'inclinazione residua del testo", s.autoDeskew) { s.autoDeskew = it }
-            Toggle("Apri subito la fotocamera", "All'avvio dell'app; l'elenco documenti resta dietro", s.startInScanner) { s.startInScanner = it }
-            Toggle("Suono otturatore", null, s.shutterSound) { s.shutterSound = it }
-            Choice("Filtro predefinito", PageFilter.entries, s.defaultFilter, { it.label }) { s.defaultFilter = it }
+            Section(str(R.string.scanning))
+            Toggle(str(R.string.auto_capture), str(R.string.auto_capture_desc), s.autoCapture) { s.autoCapture = it }
+            Toggle(str(R.string.auto_deskew), str(R.string.auto_deskew_desc), s.autoDeskew) { s.autoDeskew = it }
+            Toggle(str(R.string.start_camera), str(R.string.start_camera_desc), s.startInScanner) { s.startInScanner = it }
+            Toggle(str(R.string.shutter_sound), null, s.shutterSound) { s.shutterSound = it }
+            Choice(str(R.string.default_filter), PageFilter.entries, s.defaultFilter, { it.label }) { s.defaultFilter = it }
 
-            Section("Esportazione")
-            Choice("Qualità / dimensione file", ExportQuality.entries, s.quality, { it.label }) { s.quality = it }
-            Choice("Formato pagina PDF", PdfPageSize.entries, s.pageSize, { it.label }) { s.pageSize = it }
+            Section(str(R.string.export))
+            Choice(str(R.string.quality_size), ExportQuality.entries, s.quality, { it.label }) { s.quality = it }
+            Choice(str(R.string.pdf_page_size), PdfPageSize.entries, s.pageSize, { it.label }) { s.pageSize = it }
 
-            Section("Voce")
-            Toggle("Detta metadati a inizio documento", "All'apertura della fotocamera", s.voiceMetaPre) { s.voiceMetaPre = it }
-            Toggle("Detta metadati a fine documento", "Dopo «Fine», prima di salvare", s.voiceMetaPost) { s.voiceMetaPost = it }
-            Toggle("Crea tag sconosciuti", "I tag dettati che non esistono vengono creati in locale", s.createUnknownTags) { s.createUnknownTags = it }
-            Choice("Lingua", listOf("it-IT", "en-US", "de-DE", "fr-FR", "es-ES"), s.voiceLanguage, { it }) { s.voiceLanguage = it }
+            Section(str(R.string.voice))
+            Toggle(str(R.string.dict_pre_setting), str(R.string.dict_pre_desc), s.voiceMetaPre) { s.voiceMetaPre = it }
+            Toggle(str(R.string.dict_post_setting), str(R.string.dict_post_desc), s.voiceMetaPost) { s.voiceMetaPost = it }
+            Toggle(str(R.string.create_tags), str(R.string.create_tags_desc), s.createUnknownTags) { s.createUnknownTags = it }
+            Choice(str(R.string.language), listOf("it-IT", "en-US", "de-DE", "fr-FR", "es-ES"), s.voiceLanguage, { it }) { s.voiceLanguage = it }
 
-            Section("Invio")
-            Toggle("Solo Wi-Fi", "Gli upload attendono una rete non a consumo", s.wifiOnly) { s.wifiOnly = it }
+            Section(str(R.string.uploads))
+            Toggle(str(R.string.wifi_only), str(R.string.wifi_only_desc), s.wifiOnly) { s.wifiOnly = it }
         }
     }
 }

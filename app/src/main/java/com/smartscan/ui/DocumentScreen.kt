@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
@@ -94,7 +98,7 @@ class DocumentViewModel(app: Application, val docId: Long) : AndroidViewModel(ap
 
     private fun job(block: suspend () -> Unit) = viewModelScope.launch {
         busy.value = true
-        try { block() } catch (e: Exception) { messages.emit("Errore: ${e.message}") } finally { busy.value = false }
+        try { block() } catch (e: Exception) { messages.emit(str(R.string.error_msg, e.message.orEmpty())) } finally { busy.value = false }
     }
 
     fun sharePdf(ocr: Boolean) = job {
@@ -117,7 +121,7 @@ class DocumentViewModel(app: Application, val docId: Long) : AndroidViewModel(ap
         withContext(Dispatchers.IO) {
             getApplication<Application>().contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
         }
-        messages.emit("PDF salvato (${f.length() / 1024} KB)")
+        messages.emit(str(R.string.pdf_saved, f.length() / 1024))
     }
 
     fun rename(title: String) = viewModelScope.launch {
@@ -159,10 +163,10 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
                     modifier = Modifier.clickable(enabled = doc != null) { renaming = true },
                 )
             },
-            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
+            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
             actions = {
-                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Modifica") }
-                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
+                IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, str(R.string.edit)) }
+                IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, str(R.string.delete)) }
             },
         )
     }) { pad ->
@@ -171,9 +175,9 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
             item {
                 if (busy || d.status == DocStatus.PROCESSING) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(
-                    "${formatDate(d.createdAt)} · ${pages.size} pagine" +
-                        (d.docDate?.let { " · data doc. $it" } ?: "") +
-                        if (d.status == DocStatus.PROCESSING) " · OCR in corso" else "",
+                    str(R.string.date_pages, formatDate(d.createdAt), pages.size) +
+                        (d.docDate?.let { str(R.string.doc_date_suffix, it) } ?: "") +
+                        if (d.status == DocStatus.PROCESSING) str(R.string.ocr_running_suffix) else "",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 val byId = nodes.associateBy { it.id }
@@ -191,26 +195,26 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
             item {
-                Text("Esporta e condividi", style = MaterialTheme.typography.titleMedium)
+                Text(str(R.string.export_share), style = MaterialTheme.typography.titleMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
-                    ActionButton(Icons.Filled.PictureAsPdf, "PDF ricercabile", !busy) { vm.sharePdf(true) }
+                    ActionButton(Icons.Filled.PictureAsPdf, str(R.string.format_pdf_ocr), !busy) { vm.sharePdf(true) }
                     ActionButton(Icons.Filled.PictureAsPdf, "PDF", !busy) { vm.sharePdf(false) }
-                    ActionButton(Icons.Filled.Image, "Immagini", !busy) { vm.shareImages() }
-                    ActionButton(Icons.Filled.Description, "Testo OCR", !busy) { vm.shareText() }
-                    ActionButton(Icons.Filled.Save, "Salva PDF…", !busy) {
+                    ActionButton(Icons.Filled.Image, str(R.string.format_images), !busy) { vm.shareImages() }
+                    ActionButton(Icons.Filled.Description, str(R.string.ocr_text), !busy) { vm.shareText() }
+                    ActionButton(Icons.Filled.Save, str(R.string.save_pdf), !busy) {
                         saveLauncher.launch(com.smartscan.export.Exporter.fileBase(d) + ".pdf")
                     }
                 }
             }
             item {
-                Text("Invio a storage", style = MaterialTheme.typography.titleMedium)
-                if (endpoints.isEmpty()) Text("Nessun endpoint: aggiungine uno via QR dalla schermata Endpoint.", style = MaterialTheme.typography.bodySmall)
+                Text(str(R.string.send_storage), style = MaterialTheme.typography.titleMedium)
+                if (endpoints.isEmpty()) Text(str(R.string.no_endpoints), style = MaterialTheme.typography.bodySmall)
             }
             items(endpoints, key = { it.id }) { ep ->
                 val u = uploads.firstOrNull { it.endpointId == ep.id }
                 ListItem(
                     headlineContent = { Text(ep.name) },
-                    supportingContent = { Text(u?.message?.ifBlank { null } ?: (if (ep.autoUpload) "Invio automatico" else "Manuale")) },
+                    supportingContent = { Text(u?.message?.ifBlank { null } ?: (if (ep.autoUpload) str(R.string.auto_upload) else str(R.string.manual))) },
                     leadingContent = {
                         when (u?.status) {
                             UploadStatus.DONE -> Icon(Icons.Filled.CloudDone, null, tint = MaterialTheme.colorScheme.primary)
@@ -221,15 +225,15 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
                         }
                     },
                     trailingContent = {
-                        TextButton(onClick = { vm.upload(ep.id) }) { Text(if (u == null) "Invia" else "Reinvia") }
+                        TextButton(onClick = { vm.upload(ep.id) }) { Text(if (u == null) str(R.string.send) else str(R.string.resend)) }
                     },
                 )
             }
             item {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Testo riconosciuto (OCR)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { showOcr = !showOcr }) { Text(if (showOcr) "Nascondi" else "Mostra") }
+                    Text(str(R.string.ocr_recognized), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { showOcr = !showOcr }) { Text(if (showOcr) str(R.string.hide) else str(R.string.show)) }
                 }
                 if (showOcr) Card(Modifier.fillMaxWidth()) {
                     SelectionContainer {
@@ -244,21 +248,21 @@ fun DocumentScreen(docId: Long, onEdit: () -> Unit, onClose: () -> Unit) {
         var name by remember { mutableStateOf(doc?.title.orEmpty()) }
         AlertDialog(
             onDismissRequest = { renaming = false },
-            title = { Text("Nome documento") },
+            title = { Text(str(R.string.doc_name)) },
             text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true) },
             confirmButton = {
-                TextButton(onClick = { vm.rename(name); renaming = false }, enabled = name.isNotBlank()) { Text("Salva") }
+                TextButton(onClick = { vm.rename(name); renaming = false }, enabled = name.isNotBlank()) { Text(str(R.string.save)) }
             },
-            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Annulla") } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text(str(R.string.cancel)) } },
         )
     }
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
-        title = { Text("Eliminare il documento?") },
-        text = { Text("Viene rimosso dall'archivio locale. Le copie già inviate agli endpoint restano.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.delete(onClose) }) { Text("Elimina") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla") } },
+        title = { Text(str(R.string.delete_doc_title)) },
+        text = { Text(str(R.string.delete_one_text)) },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.delete(onClose) }) { Text(str(R.string.delete)) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(str(R.string.cancel)) } },
     )
 }
 

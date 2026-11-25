@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
@@ -137,7 +141,7 @@ class ReviewViewModel(app: Application, val docId: Long) : AndroidViewModel(app)
     fun dictate() {
         if (listening.value) { voice.stop(); return }
         voice.listenOnce { text ->
-            if (text.isNullOrBlank()) { voiceSummary.value = "Non ho capito, riprova"; return@listenOnce }
+            if (text.isNullOrBlank()) { voiceSummary.value = str(R.string.voice_not_understood); return@listenOnce }
             viewModelScope.launch {
                 // Persist what the user typed so far, then merge the spoken metadata.
                 c.repo.getDoc(docId)?.let { c.repo.updateDoc(it.copy(title = title.value, notes = notes.value)) }
@@ -202,15 +206,15 @@ fun ReviewScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (pages.isEmpty()) "Rivedi" else "Pagina ${pager.currentPage + 1} di ${pages.size}") },
+                title = { Text(if (pages.isEmpty()) str(R.string.review) else "Pagina ${pager.currentPage + 1} di ${pages.size}") },
                 navigationIcon = {
                     IconButton(onClick = { if (isDraft) confirmDiscard = true else onClose() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back))
                     }
                 },
                 actions = {
                     Button(onClick = { vm.save(onClose) }, enabled = pages.isNotEmpty() && busy.isEmpty(), modifier = Modifier.padding(end = 8.dp)) {
-                        Text("Salva")
+                        Text(str(R.string.save))
                     }
                 },
             )
@@ -219,13 +223,13 @@ fun ReviewScreen(
         Column(Modifier.padding(pad).fillMaxSize().imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)) {
                 if (pages.isEmpty()) {
-                    Text("Nessuna pagina", Modifier.align(Alignment.Center))
+                    Text(str(R.string.no_pages), Modifier.align(Alignment.Center))
                 } else {
                     HorizontalPager(pager, Modifier.fillMaxSize(), key = { pages.getOrNull(it)?.id ?: it }) { i ->
                         val p = pages.getOrNull(i)
                         Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
                             if (p != null) AsyncImage(
-                                model = File(p.processedPath), contentDescription = "Pagina ${i + 1}",
+                                model = File(p.processedPath), contentDescription = str(R.string.page_n, i + 1),
                                 contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
                             )
                             if (p != null && p.id in busy) CircularProgressIndicator()
@@ -238,16 +242,16 @@ fun ReviewScreen(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ToolButton(Icons.Filled.Crop, "Ritaglia", current != null) { current?.let { onCrop(it.id) } }
-                ToolButton(Icons.Filled.RotateRight, "Ruota", current != null) { current?.let { vm.rotate(it) } }
-                ToolButton(Icons.Filled.ChevronLeft, "Sposta", current != null && pager.currentPage > 0) {
+                ToolButton(Icons.Filled.Crop, str(R.string.crop), current != null) { current?.let { onCrop(it.id) } }
+                ToolButton(Icons.Filled.RotateRight, str(R.string.rotate), current != null) { current?.let { vm.rotate(it) } }
+                ToolButton(Icons.Filled.ChevronLeft, str(R.string.move), current != null && pager.currentPage > 0) {
                     current?.let { vm.move(it, -1); scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } }
                 }
-                ToolButton(Icons.Filled.ChevronRight, "Sposta", current != null && pager.currentPage < pages.lastIndex) {
+                ToolButton(Icons.Filled.ChevronRight, str(R.string.move), current != null && pager.currentPage < pages.lastIndex) {
                     current?.let { vm.move(it, 1); scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } }
                 }
-                ToolButton(Icons.Filled.Delete, "Elimina", current != null) { current?.let { vm.delete(it) } }
-                ToolButton(Icons.Filled.AddAPhoto, "Aggiungi", true) { onAddPages(docId) }
+                ToolButton(Icons.Filled.Delete, str(R.string.delete), current != null) { current?.let { vm.delete(it) } }
+                ToolButton(Icons.Filled.AddAPhoto, str(R.string.add), true) { onAddPages(docId) }
             }
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
@@ -262,14 +266,14 @@ fun ReviewScreen(
             ) {
                 OutlinedTextField(
                     value = title, onValueChange = { vm.title.value = it },
-                    label = { Text("Titolo") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    label = { Text(str(R.string.title)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
                         if (vm.voiceAvailable) IconButton(onClick = { dictate() }) {
-                            Icon(Icons.Filled.Mic, "Detta metadati", tint = if (listening) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(Icons.Filled.Mic, str(R.string.dictate_metadata), tint = if (listening) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                 )
-                if (listening) Text("🎙 " + partial.ifBlank { "Parla: «titolo … categoria … tag … nota …»" }, style = MaterialTheme.typography.bodySmall)
+                if (listening) Text("🎙 " + partial.ifBlank { str(R.string.speak_meta_hint) }, style = MaterialTheme.typography.bodySmall)
                 summary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                 val byId = nodes.associateBy { it.id }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
@@ -281,11 +285,11 @@ fun ReviewScreen(
                             trailingIcon = { Text("✕") },
                         )
                     }
-                    AssistChip(onClick = { picker = true }, label = { Text("Categorie e tag") }, leadingIcon = { Icon(Icons.Filled.Add, null) })
+                    AssistChip(onClick = { picker = true }, label = { Text(str(R.string.categories_tags)) }, leadingIcon = { Icon(Icons.Filled.Add, null) })
                 }
                 OutlinedTextField(
                     value = notes, onValueChange = { vm.notes.value = it },
-                    label = { Text("Note") }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
+                    label = { Text(str(R.string.notes)) }, modifier = Modifier.fillMaxWidth(), maxLines = 3,
                 )
                 Spacer(Modifier.size(8.dp))
             }
@@ -300,11 +304,11 @@ fun ReviewScreen(
     )
     if (confirmDiscard) AlertDialog(
         onDismissRequest = { confirmDiscard = false },
-        title = { Text("Scartare la scansione?") },
-        text = { Text("Le pagine acquisite verranno eliminate.") },
-        confirmButton = { TextButton(onClick = { confirmDiscard = false; vm.discard(onClose) }) { Text("Scarta") } },
+        title = { Text(str(R.string.discard_title)) },
+        text = { Text(str(R.string.discard_text)) },
+        confirmButton = { TextButton(onClick = { confirmDiscard = false; vm.discard(onClose) }) { Text(str(R.string.discard)) } },
         dismissButton = {
-            TextButton(onClick = { confirmDiscard = false; vm.save(onClose) }) { Text("Salva") }
+            TextButton(onClick = { confirmDiscard = false; vm.save(onClose) }) { Text(str(R.string.save)) }
         },
     )
 }

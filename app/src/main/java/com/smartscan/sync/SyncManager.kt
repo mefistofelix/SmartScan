@@ -1,5 +1,9 @@
 package com.smartscan.sync
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.content.Context
 import androidx.room.withTransaction
 import androidx.work.BackoffPolicy
@@ -72,7 +76,7 @@ class SyncManager(
         val ocr = OneTimeWorkRequestBuilder<OcrWorker>().setInputData(workDataOf(KEY_DOC to docId)).build()
         val send = repo.getDoc(docId)?.upload != false
         val uploads = if (!send) emptyList() else repo.endpoints().filter { it.autoUpload }.map { ep ->
-            repo.setUpload(docId, ep.id, UploadStatus.QUEUED, "In coda")
+            repo.setUpload(docId, ep.id, UploadStatus.QUEUED, str(R.string.status_queued))
             uploadRequest(docId, ep.id)
         }
         var chain = wm.beginUniqueWork("finalize-$docId", ExistingWorkPolicy.REPLACE, ocr)
@@ -81,7 +85,7 @@ class SyncManager(
     }
 
     suspend fun enqueueUpload(docId: Long, endpointId: Long) {
-        repo.setUpload(docId, endpointId, UploadStatus.QUEUED, "In coda")
+        repo.setUpload(docId, endpointId, UploadStatus.QUEUED, str(R.string.status_queued))
         wm.enqueueUniqueWork("upload-$docId-$endpointId", ExistingWorkPolicy.REPLACE, uploadRequest(docId, endpointId))
     }
 
@@ -100,8 +104,8 @@ class SyncManager(
     // ---------- upload ----------
 
     suspend fun upload(docId: Long, endpointId: Long): String? = withContext(Dispatchers.IO) {
-        val ep = repo.endpoint(endpointId) ?: throw IllegalStateException("Endpoint rimosso")
-        val doc = repo.getDoc(docId) ?: throw IllegalStateException("Documento rimosso")
+        val ep = repo.endpoint(endpointId) ?: throw IllegalStateException(str(R.string.err_endpoint_removed))
+        val doc = repo.getDoc(docId) ?: throw IllegalStateException(str(R.string.err_doc_removed))
         if (repo.pages(docId).any { it.ocrText == null }) repo.runOcr(docId, context.container.ocr, context.container.codes)
         val dir = File(context.cacheDir, "upload/$docId-$endpointId").apply { deleteRecursively(); mkdirs() }
         try {
@@ -225,7 +229,7 @@ class SyncManager(
 
     /** Downloads the category/tag tree from the endpoint and merges it (stable ids, keeps assignments). */
     suspend fun syncTaxonomy(endpointId: Long): Result<Int> = withContext(Dispatchers.IO) {
-        val ep = repo.endpoint(endpointId) ?: return@withContext Result.failure(IllegalStateException("Endpoint rimosso"))
+        val ep = repo.endpoint(endpointId) ?: return@withContext Result.failure(IllegalStateException(str(R.string.err_endpoint_removed)))
         val url = ep.taxonomyUrl ?: return@withContext Result.success(0)
         val res = runCatching {
             val req = Request.Builder().url(url).get().withHeaders(ep).header("Accept", "application/json").build()
@@ -305,15 +309,15 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         val epId = inputData.getLong(SyncManager.KEY_ENDPOINT, -1)
         if (docId < 0 || epId < 0) return Result.failure()
         val c = applicationContext.container
-        c.repo.setUpload(docId, epId, UploadStatus.RUNNING, "Invio in corso…")
+        c.repo.setUpload(docId, epId, UploadStatus.RUNNING, str(R.string.status_sending))
         return try {
             val ref = c.sync.upload(docId, epId)
-            c.repo.setUpload(docId, epId, UploadStatus.DONE, "Inviato", ref)
+            c.repo.setUpload(docId, epId, UploadStatus.DONE, str(R.string.status_sent), ref)
             Result.success()
         } catch (e: Exception) {
             val retryable = e is IOException && !(e is HttpStatusException && e.code in 400..499 && e.code != 408 && e.code != 429)
             if (retryable && runAttemptCount < 5) {
-                c.repo.setUpload(docId, epId, UploadStatus.QUEUED, "Nuovo tentativo: ${e.message}")
+                c.repo.setUpload(docId, epId, UploadStatus.QUEUED, str(R.string.status_retry, e.message.orEmpty()))
                 Result.retry()
             } else {
                 c.repo.setUpload(docId, epId, UploadStatus.FAILED, e.message ?: e.javaClass.simpleName)

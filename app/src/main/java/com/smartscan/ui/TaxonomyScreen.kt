@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,12 +86,12 @@ fun TaxonomyScreen(onClose: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Categorie e tag") },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
-                actions = { IconButton(onClick = { vm.syncAll() }) { Icon(Icons.Filled.Sync, "Sincronizza remoti") } },
+                title = { Text(str(R.string.categories_tags)) },
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
+                actions = { IconButton(onClick = { vm.syncAll() }) { Icon(Icons.Filled.Sync, str(R.string.sync_remote)) } },
             )
         },
-        floatingActionButton = { FloatingActionButton(onClick = { edit = NameEdit.Add(null) }) { Icon(Icons.Filled.Add, "Nuovo") } },
+        floatingActionButton = { FloatingActionButton(onClick = { edit = NameEdit.Add(null) }) { Icon(Icons.Filled.Add, str(R.string.new_item)) } },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             TabRow(selectedTabIndex = tab) {
@@ -98,14 +102,14 @@ fun TaxonomyScreen(onClose: () -> Unit) {
                     val editable = list.firstOrNull()?.endpointId == null
                     item(key = "h_$source") {
                         Text(
-                            if (editable) source else "$source (remoto, sola lettura)",
+                            if (editable) source else str(R.string.remote_readonly, source),
                             style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp, 16.dp, 16.dp, 4.dp)
                         )
                     }
                     val rows = flattenTree(list, expanded)
                     if (rows.isEmpty()) item(key = "e_$source") {
-                        Text("Vuoto: usa + per creare.", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+                        Text(str(R.string.empty_tax), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
                     }
                     items(rows, key = { it.node.id }) { row ->
                         val n = row.node
@@ -116,11 +120,11 @@ fun TaxonomyScreen(onClose: () -> Unit) {
                                 if (n.endpointId == null) {
                                     var menu by remember { mutableStateOf(false) }
                                     Box {
-                                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Azioni") }
+                                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, str(R.string.actions)) }
                                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                            DropdownMenuItem(text = { Text("Aggiungi sotto-voce") }, onClick = { menu = false; edit = NameEdit.Add(n); expanded = expanded + n.id })
-                                            DropdownMenuItem(text = { Text("Rinomina") }, onClick = { menu = false; edit = NameEdit.Rename(n) })
-                                            DropdownMenuItem(text = { Text("Elimina") }, onClick = { menu = false; toDelete = n })
+                                            DropdownMenuItem(text = { Text(str(R.string.add_child)) }, onClick = { menu = false; edit = NameEdit.Add(n); expanded = expanded + n.id })
+                                            DropdownMenuItem(text = { Text(str(R.string.rename)) }, onClick = { menu = false; edit = NameEdit.Rename(n) })
+                                            DropdownMenuItem(text = { Text(str(R.string.delete)) }, onClick = { menu = false; toDelete = n })
                                         }
                                     }
                                 }
@@ -140,12 +144,12 @@ fun TaxonomyScreen(onClose: () -> Unit) {
             title = {
                 Text(
                     when (e) {
-                        is NameEdit.Add -> if (e.parent == null) "Nuova voce in ${kind.label}" else "Nuova voce in «${e.parent.name}»"
-                        is NameEdit.Rename -> "Rinomina"
+                        is NameEdit.Add -> if (e.parent == null) str(R.string.new_item_in, kind.label) else str(R.string.new_item_under, e.parent.name)
+                        is NameEdit.Rename -> str(R.string.rename)
                     }
                 )
             },
-            text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Nome") }) },
+            text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text(str(R.string.name)) }) },
             confirmButton = {
                 TextButton(enabled = name.isNotBlank(), onClick = {
                     when (e) {
@@ -155,16 +159,16 @@ fun TaxonomyScreen(onClose: () -> Unit) {
                     edit = null
                 }) { Text("OK") }
             },
-            dismissButton = { TextButton(onClick = { edit = null }) { Text("Annulla") } },
+            dismissButton = { TextButton(onClick = { edit = null }) { Text(str(R.string.cancel)) } },
         )
     }
     toDelete?.let { n ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
-            title = { Text("Eliminare «${n.name}»?") },
-            text = { Text("Verranno eliminate anche le sotto-voci e tolte dai documenti.") },
-            confirmButton = { TextButton(onClick = { vm.delete(n); toDelete = null }) { Text("Elimina") } },
-            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annulla") } },
+            title = { Text(str(R.string.delete_node_title, n.name)) },
+            text = { Text(str(R.string.delete_node_text)) },
+            confirmButton = { TextButton(onClick = { vm.delete(n); toDelete = null }) { Text(str(R.string.delete)) } },
+            dismissButton = { TextButton(onClick = { toDelete = null }) { Text(str(R.string.cancel)) } },
         )
     }
 }

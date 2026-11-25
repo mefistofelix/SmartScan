@@ -1,5 +1,9 @@
 package com.smartscan.data
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.content.Context
 import androidx.room.withTransaction
 import com.smartscan.ocr.CodeReader
@@ -62,7 +66,7 @@ class Repository(private val context: Context, val db: AppDatabase) {
     ) {
         val d = docs.get(docId) ?: return
         val t = (title ?: d.title).ifBlank {
-            "Scansione " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(d.createdAt))
+            str(R.string.scan_prefix_space) + " " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY).format(Date(d.createdAt))
         }
         updateDoc(d.copy(title = t, notes = notes ?: d.notes, output = output ?: d.output, upload = upload ?: d.upload,
             status = DocStatus.PROCESSING,

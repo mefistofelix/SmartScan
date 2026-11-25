@@ -1,5 +1,9 @@
 package com.smartscan.sync
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.net.Uri
 import android.util.Base64
 import com.smartscan.data.EndpointEntity
@@ -35,16 +39,16 @@ object EndpointConfig {
         var s = raw.trim()
         if (s.startsWith("smartscan://", ignoreCase = true)) {
             val cfg = Uri.parse(s).getQueryParameter("cfg")
-                ?: throw IllegalArgumentException("Link SmartScan senza parametro cfg")
+                ?: throw IllegalArgumentException(str(R.string.err_link_no_cfg))
             s = String(Base64.decode(cfg, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING), Charsets.UTF_8)
         }
         val q = try {
             json.decodeFromString<EndpointQr>(s)
         } catch (e: Exception) {
-            throw IllegalArgumentException("QR non valido: non è una configurazione SmartScan")
+            throw IllegalArgumentException(str(R.string.err_qr_invalid))
         }
-        require(q.url.startsWith("https://") || q.url.startsWith("http://")) { "URL non valido" }
-        q.taxonomy?.let { require(it.startsWith("https://") || it.startsWith("http://")) { "URL tassonomia non valido" } }
+        require(q.url.startsWith("https://") || q.url.startsWith("http://")) { str(R.string.err_url_invalid) }
+        q.taxonomy?.let { require(it.startsWith("https://") || it.startsWith("http://")) { str(R.string.err_tax_url_invalid) } }
         val type = when (q.type.lowercase()) {
             "webdav", "dav" -> EndpointType.WEBDAV
             else -> EndpointType.HTTP

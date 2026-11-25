@@ -1,5 +1,9 @@
 package com.smartscan.export
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import com.smartscan.data.DocumentEntity
 import com.smartscan.data.PageEntity
 import com.smartscan.ocr.PageCode
@@ -13,9 +17,9 @@ class PageMeta(val note: String, val lat: Double?, val lon: Double?, val codes: 
 
     /** Human readable block, used for the PDF page annotation and the image description. */
     fun text(): String = buildList {
-        if (note.isNotBlank()) add("Nota: $note")
-        codes.forEach { add("Codice ${it.format}: ${it.value}") }
-        if (lat != null && lon != null) add("Posizione: ${coord(lat)}, ${coord(lon)}")
+        if (note.isNotBlank()) add(str(R.string.meta_note, note))
+        codes.forEach { add(str(R.string.meta_code, it.format, it.value)) }
+        if (lat != null && lon != null) add(str(R.string.meta_position, coord(lat), coord(lon)))
     }.joinToString("\n")
 
     companion object {

@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
@@ -107,14 +111,14 @@ class EndpointsViewModel(app: Application) : AndroidViewModel(app) {
         try {
             pendingAdd.value = EndpointConfig.parse(raw)
         } catch (e: Exception) {
-            messages.tryEmit(e.message ?: "Configurazione non valida")
+            messages.tryEmit(e.message ?: str(R.string.err_config_invalid))
         }
     }
 
     fun confirmAdd(e: EndpointEntity) = viewModelScope.launch {
         pendingAdd.value = null
         val id = c.repo.addEndpoint(e)
-        messages.emit("Endpoint «${e.name}» aggiunto")
+        messages.emit(str(R.string.endpoint_added, e.name))
         if (e.taxonomyUrl != null) sync(id)
     }
 
@@ -122,7 +126,7 @@ class EndpointsViewModel(app: Application) : AndroidViewModel(app) {
         syncing.value = syncing.value + id
         val r = c.sync.syncTaxonomy(id)
         syncing.value = syncing.value - id
-        messages.emit(r.fold({ "Tassonomia sincronizzata ($it voci)" }, { "Sync fallita: ${it.message}" }))
+        messages.emit(r.fold({ str(R.string.tax_synced, it) }, { str(R.string.sync_failed, it.message.orEmpty()) }))
     }
 
     fun setAuto(e: EndpointEntity, v: Boolean) = viewModelScope.launch { c.repo.updateEndpoint(e.copy(autoUpload = v)) }
@@ -149,18 +153,18 @@ fun EndpointsScreen(onScanQr: () -> Unit, onClose: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Endpoint di storage") },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
-                actions = { IconButton(onClick = { manual = true }) { Icon(Icons.Filled.Add, "Aggiungi manualmente") } },
+                title = { Text(str(R.string.endpoints_title)) },
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
+                actions = { IconButton(onClick = { manual = true }) { Icon(Icons.Filled.Add, str(R.string.add_manual)) } },
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(onClick = onScanQr, icon = { Icon(Icons.Filled.QrCodeScanner, null) }, text = { Text("Aggiungi da QR") })
+            ExtendedFloatingActionButton(onClick = onScanQr, icon = { Icon(Icons.Filled.QrCodeScanner, null) }, text = { Text(str(R.string.add_qr)) })
         },
     ) { pad ->
         if (endpoints.isEmpty()) Box(Modifier.padding(pad).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
             Text(
-                "Nessun endpoint.\nInquadra il QR di configurazione fornito dal tuo server per abilitare l'invio automatico e la tassonomia remota.",
+                str(R.string.no_endpoints_long),
                 style = MaterialTheme.typography.bodyLarge,
             )
         } else LazyColumn(Modifier.padding(pad), contentPadding = PaddingValues(12.dp, 8.dp, 12.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -173,12 +177,12 @@ fun EndpointsScreen(onScanQr: () -> Unit, onClose: () -> Unit) {
                                 Text("${e.type.name} · ${Uri.parse(e.url).host}", style = MaterialTheme.typography.bodySmall)
                             }
                             if (e.taxonomyUrl != null) IconButton(onClick = { vm.sync(e.id) }, enabled = e.id !in syncing) {
-                                Icon(Icons.Filled.Sync, "Sincronizza tassonomia")
+                                Icon(Icons.Filled.Sync, str(R.string.sync_taxonomy))
                             }
-                            IconButton(onClick = { toDelete = e }) { Icon(Icons.Filled.Delete, "Rimuovi") }
+                            IconButton(onClick = { toDelete = e }) { Icon(Icons.Filled.Delete, str(R.string.remove)) }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Invio automatico", Modifier.weight(1f))
+                            Text(str(R.string.auto_upload), Modifier.weight(1f))
                             Switch(checked = e.autoUpload, onCheckedChange = { vm.setAuto(e, it) })
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -187,14 +191,14 @@ fun EndpointsScreen(onScanQr: () -> Unit, onClose: () -> Unit) {
                             }
                         }
                         val syncText = when {
-                            e.taxonomyUrl == null -> "Nessuna tassonomia remota"
-                            e.lastSyncError != null -> "Ultima sync fallita: ${e.lastSyncError}"
-                            e.lastSync != null -> "Tassonomia aggiornata ${formatDate(e.lastSync)}"
-                            else -> "Tassonomia non ancora sincronizzata"
+                            e.taxonomyUrl == null -> str(R.string.no_remote_tax)
+                            e.lastSyncError != null -> str(R.string.last_sync_failed, e.lastSyncError.orEmpty())
+                            e.lastSync != null -> str(R.string.tax_updated, formatDate(e.lastSync))
+                            else -> str(R.string.tax_never)
                         }
                         Text(syncText, style = MaterialTheme.typography.bodySmall)
                         if (e.url.startsWith("http://")) Text(
-                            "Attenzione: connessione non cifrata (http)", color = MaterialTheme.colorScheme.error,
+                            str(R.string.warn_http), color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -208,10 +212,10 @@ fun EndpointsScreen(onScanQr: () -> Unit, onClose: () -> Unit) {
     toDelete?.let { e ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
-            title = { Text("Rimuovere «${e.name}»?") },
-            text = { Text("Verranno rimossi anche le categorie/tag sincronizzati da questo endpoint e le loro assegnazioni.") },
-            confirmButton = { TextButton(onClick = { vm.delete(e); toDelete = null }) { Text("Rimuovi") } },
-            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Annulla") } },
+            title = { Text(str(R.string.remove_endpoint_title, e.name)) },
+            text = { Text(str(R.string.remove_endpoint_text)) },
+            confirmButton = { TextButton(onClick = { vm.delete(e); toDelete = null }) { Text(str(R.string.remove)) } },
+            dismissButton = { TextButton(onClick = { toDelete = null }) { Text(str(R.string.cancel)) } },
         )
     }
 }
@@ -221,23 +225,23 @@ private fun ConfirmEndpointDialog(e: EndpointEntity, onConfirm: () -> Unit, onDi
     val headers = EndpointConfig.headers(e)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Aggiungere questo endpoint?") },
+        title = { Text(str(R.string.add_endpoint_title)) },
         text = {
             Column {
-                Text("Verifica che sia un server di cui ti fidi: i documenti verranno inviati qui.")
+                Text(str(R.string.add_endpoint_trust))
                 Spacer(Modifier.height(8.dp))
-                Text("Nome: ${e.name}", fontWeight = FontWeight.Bold)
-                Text("Tipo: ${e.type.name}")
+                Text(str(R.string.name_value, e.name), fontWeight = FontWeight.Bold)
+                Text(str(R.string.type_value, e.type.name))
                 Text("Host: ${Uri.parse(e.url).host}")
                 Text("URL: ${e.url}", style = MaterialTheme.typography.bodySmall)
-                e.taxonomyUrl?.let { Text("Tassonomia: ${Uri.parse(it).host}", style = MaterialTheme.typography.bodySmall) }
-                if (headers.isNotEmpty()) Text("Intestazioni: ${headers.keys.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                Text("Invio automatico: ${if (e.autoUpload) "sì" else "no"} · Formato: ${e.format.label}")
-                if (e.url.startsWith("http://")) Text("Connessione non cifrata!", color = MaterialTheme.colorScheme.error)
+                e.taxonomyUrl?.let { Text(str(R.string.taxonomy_value, Uri.parse(it).host.orEmpty()), style = MaterialTheme.typography.bodySmall) }
+                if (headers.isNotEmpty()) Text(str(R.string.headers_value, headers.keys.joinToString()), style = MaterialTheme.typography.bodySmall)
+                Text(str(R.string.endpoint_summary, str(if (e.autoUpload) R.string.yes else R.string.no), e.format.label))
+                if (e.url.startsWith("http://")) Text(str(R.string.unencrypted), color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Aggiungi") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(str(R.string.add)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -251,17 +255,17 @@ private fun ManualEndpointDialog(onDismiss: () -> Unit, onSave: (EndpointEntity)
     val valid = url.startsWith("http://") || url.startsWith("https://")
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Nuovo endpoint") },
+        title = { Text(str(R.string.new_endpoint)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(name, { name = it }, label = { Text("Nome") }, singleLine = true)
-                OutlinedTextField(url, { url = it }, label = { Text("URL upload") }, singleLine = true)
+                OutlinedTextField(name, { name = it }, label = { Text(str(R.string.name)) }, singleLine = true)
+                OutlinedTextField(url, { url = it }, label = { Text(str(R.string.upload_url)) }, singleLine = true)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected = !webdav, onClick = { webdav = false }, label = { Text("HTTP POST") })
                     FilterChip(selected = webdav, onClick = { webdav = true }, label = { Text("WebDAV") })
                 }
-                OutlinedTextField(auth, { auth = it }, label = { Text("Authorization (opzionale)") }, singleLine = true)
-                OutlinedTextField(taxonomy, { taxonomy = it }, label = { Text("URL tassonomia (opzionale)") }, singleLine = true)
+                OutlinedTextField(auth, { auth = it }, label = { Text(str(R.string.authorization_optional)) }, singleLine = true)
+                OutlinedTextField(taxonomy, { taxonomy = it }, label = { Text(str(R.string.tax_url_optional)) }, singleLine = true)
             }
         },
         confirmButton = {
@@ -276,9 +280,9 @@ private fun ManualEndpointDialog(onDismiss: () -> Unit, onSave: (EndpointEntity)
                         taxonomyUrl = taxonomy.trim().takeIf { it.startsWith("http") },
                     )
                 )
-            }) { Text("Continua") }
+            }) { Text(str(R.string.continue_)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Annulla") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(str(R.string.cancel)) } },
     )
 }
 
@@ -328,10 +332,10 @@ fun QrScanScreen(onResult: (String) -> Unit, onClose: () -> Unit) {
             Box(Modifier.align(Alignment.Center).size(260.dp).border(3.dp, Color.White, RoundedCornerShape(24.dp)))
         }
         IconButton(onClick = onClose, modifier = Modifier.statusBarsPadding().padding(8.dp)) {
-            Icon(Icons.Filled.Close, "Chiudi", tint = Color.White)
+            Icon(Icons.Filled.Close, str(R.string.close), tint = Color.White)
         }
         Text(
-            "Inquadra il QR di configurazione dell'endpoint", color = Color.White,
+            str(R.string.qr_hint), color = Color.White,
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(32.dp)
         )
     }

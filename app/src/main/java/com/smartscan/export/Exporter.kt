@@ -1,5 +1,9 @@
 package com.smartscan.export
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -41,9 +45,9 @@ class Exporter(
 
     suspend fun exportPdf(docId: Long, withOcr: Boolean, outDir: File = exportsDir()): File =
         withContext(Dispatchers.Default) {
-            val doc = requireNotNull(repo.getDoc(docId)) { "Documento non trovato" }
+            val doc = requireNotNull(repo.getDoc(docId)) { str(R.string.err_doc_not_found) }
             val pages = repo.pages(docId)
-            require(pages.isNotEmpty()) { "Il documento non ha pagine" }
+            require(pages.isNotEmpty()) { str(R.string.err_doc_no_pages) }
             val q = settings.quality
             val meta = docMeta(doc, pages)
             val pdfPages = pages.mapIndexed { i, p ->
@@ -59,7 +63,7 @@ class Exporter(
 
     suspend fun exportImages(docId: Long, outDir: File = exportsDir()): List<File> =
         withContext(Dispatchers.Default) {
-            val doc = requireNotNull(repo.getDoc(docId)) { "Documento non trovato" }
+            val doc = requireNotNull(repo.getDoc(docId)) { str(R.string.err_doc_not_found) }
             val q = settings.quality
             outDir.mkdirs()
             val pages = repo.pages(docId)
@@ -79,8 +83,8 @@ class Exporter(
         }
 
     suspend fun exportText(docId: Long, outDir: File = exportsDir()): File = withContext(Dispatchers.IO) {
-        val doc = requireNotNull(repo.getDoc(docId)) { "Documento non trovato" }
-        val text = repo.pages(docId).mapIndexed { i, p -> "--- Pagina ${i + 1} ---\n${p.ocrText.orEmpty()}" }
+        val doc = requireNotNull(repo.getDoc(docId)) { str(R.string.err_doc_not_found) }
+        val text = repo.pages(docId).mapIndexed { i, p -> str(R.string.ocr_page_header, i + 1) + "\n" + p.ocrText.orEmpty() }
             .joinToString("\n\n")
         outDir.mkdirs()
         File(outDir, fileBase(doc) + ".txt").apply { writeText(text) }
@@ -134,7 +138,7 @@ class Exporter(
      * OCR is pending) or a folder of images.
      */
     suspend fun exportZip(docIds: List<Long>): File = withContext(Dispatchers.IO) {
-        require(docIds.isNotEmpty()) { "Nessun documento selezionato" }
+        require(docIds.isNotEmpty()) { str(R.string.err_none_selected) }
         val work = File(exportsDir(), "zip_${System.nanoTime()}").apply { mkdirs() }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.ITALY).format(Date())
         val zip = File(exportsDir(), "SmartScan_${docIds.size}doc_$stamp.zip")
@@ -211,11 +215,11 @@ class Exporter(
         }
         send.type = mime
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return Intent.createChooser(send, "Condividi").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return Intent.createChooser(send, str(R.string.share)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
     companion object {
-        fun displayTitle(doc: DocumentEntity) = doc.title.ifBlank { "Documento ${doc.id}" }
+        fun displayTitle(doc: DocumentEntity) = doc.title.ifBlank { str(R.string.doc_n, doc.id) }
 
         fun fileBase(doc: DocumentEntity): String {
             val t = displayTitle(doc).replace(Regex("[^\\p{L}\\p{N} _.-]"), "_").trim().take(60)

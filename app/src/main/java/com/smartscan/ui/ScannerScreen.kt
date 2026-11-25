@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.Manifest
 import android.app.Application
 import android.content.Context
@@ -355,7 +359,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         val on = _ui.value.torch
         if (on && !cam.cameraInfo.hasFlashUnit()) {
             _ui.update { it.copy(torch = false) }
-            notify("Questa fotocamera non ha la luce")
+            notify(str(R.string.no_flash))
             return
         }
         val f = cam.cameraControl.enableTorch(on)
@@ -418,7 +422,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                             )
                         } catch (e: Exception) {
                             Log.e("Scanner", "process", e)
-                            events.tryEmit(ScanEvent.Message("Errore elaborazione: ${e.message}"))
+                            events.tryEmit(ScanEvent.Message(str(R.string.err_processing, e.message.orEmpty())))
                         } finally {
                             _ui.update { it.copy(processing = it.processing - 1) }
                         }
@@ -428,7 +432,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 override fun onError(exception: ImageCaptureException) {
                     controller.reset()
                     _ui.update { it.copy(capturing = false) }
-                    events.tryEmit(ScanEvent.Message("Scatto non riuscito: ${exception.message}"))
+                    events.tryEmit(ScanEvent.Message(str(R.string.err_capture, exception.message.orEmpty())))
                 }
             }
         )
@@ -462,8 +466,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 tracker.reset()
                 _ui.update { it.copy(metaSummary = null, showPages = false, notes = emptyList(), showNotes = false, savedCount = it.savedCount + 1) }
                 notify(
-                    "Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}" +
-                        if (_ui.value.canUpload && !_ui.value.upload) " · solo locale" else ""
+                    str(R.string.doc_saved_summary, n, str(if (n == 1) R.string.page_one else R.string.page_many), _ui.value.output.label) +
+                        if (_ui.value.canUpload && !_ui.value.upload) str(R.string.local_only_suffix) else ""
                 )
                 // Straight back to the camera: no dictation prompt in between (pre-dictation only when the scanner opens).
                 if (!closing) resumeCommands()
@@ -486,7 +490,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 if (c.repo.pageCount(id) == 0) c.repo.deleteDoc(id)
                 else {
                     save(id)
-                    events.emit(ScanEvent.Message("Documento salvato"))
+                    events.emit(ScanEvent.Message(str(R.string.doc_saved)))
                 }
             }
             events.emit(ScanEvent.Closed)
@@ -512,7 +516,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private fun deleteLast() {
         viewModelScope.launch {
-            pages.value.lastOrNull()?.let { c.repo.deletePage(it); notify("Ultima pagina eliminata") }
+            pages.value.lastOrNull()?.let { c.repo.deletePage(it); notify(str(R.string.last_page_deleted)) }
         }
     }
 
@@ -529,9 +533,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         _ui.update { it.copy(auto = v, progress = 0f) }
         notify(
             when {
-                !_ui.value.edges -> "Lo scatto automatico richiede i bordi attivi"
-                v -> "Scatto automatico attivo"
-                else -> "Scatto automatico spento"
+                !_ui.value.edges -> str(R.string.auto_needs_edges)
+                v -> str(R.string.auto_on)
+                else -> str(R.string.auto_off)
             }
         )
     }
@@ -545,7 +549,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             // Samsung (and other) phones block the LED when the battery is low, without any error to the app.
             val bm = getApplication<Application>().getSystemService(android.os.BatteryManager::class.java)
             val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
-            if (level in 0..15) notify("Batteria al $level%: il telefono può bloccare la luce")
+            if (level in 0..15) notify(str(R.string.battery_light, level))
         }
     }
 
@@ -553,21 +557,21 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         val v = !_ui.value.upload
         settings.uploadOnFinish = v
         _ui.update { it.copy(upload = v) }
-        notify(if (v) "Invio agli storage a «Fine»" else "Solo locale: a «Fine» non viene inviato")
+        notify(if (v) str(R.string.upload_on) else str(R.string.upload_off))
     }
 
     fun togglePreview() {
         val v = !_ui.value.fullPreview
         settings.fullPreview = v
         _ui.update { it.copy(fullPreview = v) }
-        notify(if (v) "Anteprima a schermo pieno (i lati sono tagliati)" else "Anteprima del fotogramma intero")
+        notify(if (v) str(R.string.preview_full_on) else str(R.string.preview_fit_on))
     }
 
     fun toggleHq() {
         val v = !_ui.value.hq
         settings.maxQuality = v
         _ui.update { it.copy(hq = v) }
-        notify(if (v) "Qualità massima: file più grandi" else "Qualità normale")
+        notify(if (v) str(R.string.hq_on) else str(R.string.hq_off))
         if (!_ui.value.capturing) bindUseCases()
     }
 
@@ -590,9 +594,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         _ui.update { it.copy(edges = edges, deskew = edges, auto = auto, quad = null, progress = 0f) }
         notify(
             when {
-                auto -> "Auto: bordi e scatto automatico"
-                edges -> "Bordi: raddrizza, scatti tu"
-                else -> "Spento: pagina intera così com'è, scatti tu"
+                auto -> str(R.string.detect_auto)
+                edges -> str(R.string.detect_manual)
+                else -> str(R.string.detect_off)
             }
         )
     }
@@ -603,14 +607,14 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             settings.geoTag = false
             location.stop()
             _ui.update { it.copy(geo = false) }
-            notify("Posizione non salvata")
+            notify(str(R.string.geo_off))
         } else if (!hasLocationPermission()) {
             events.tryEmit(ScanEvent.NeedLocation)
         } else enableGeo()
     }
 
     fun onLocationPermission(granted: Boolean) {
-        if (granted) enableGeo() else notify("Serve il permesso posizione")
+        if (granted) enableGeo() else notify(str(R.string.need_location))
     }
 
     /** Called when the scanner opens: resumes tracking if «GPS» was left on. */
@@ -622,7 +626,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
         settings.geoTag = true
         location.start()
         _ui.update { it.copy(geo = true) }
-        notify(if (location.anyProviderEnabled) "Posizione salvata con ogni pagina" else "Attiva la localizzazione del telefono")
+        notify(if (location.anyProviderEnabled) str(R.string.geo_on) else str(R.string.enable_location))
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -637,7 +641,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
     fun recordNote() {
         if (_ui.value.dictation == Dictation.NOTE) { skipDictation(); return }
         if (_ui.value.dictation != null || _ui.value.saving || closing) return
-        if (!voice.available) { notify("Riconoscimento vocale non disponibile"); return }
+        if (!voice.available) { notify(str(R.string.voice_unavailable)); return }
         if (!audioOk) { events.tryEmit(ScanEvent.NeedAudio); return }
         val wasOn = _ui.value.voiceOn
         viewModelScope.launch {
@@ -650,7 +654,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 val doc = c.repo.appendNote(id, text, pageId)
                 val note = VoiceNote(Repository.normalizeNote(text), pageId)
                 _ui.update { it.copy(notes = it.notes + note) }
-                notify("Nota aggiunta" + (doc?.title?.takeIf { it.isNotBlank() }?.let { " · «$it»" } ?: ""))
+                notify(str(R.string.note_added) + (doc?.title?.takeIf { it.isNotBlank() }?.let { " · «$it»" } ?: ""))
             }
             if (closing) return@launch
             if (wasOn) startCommands() else _ui.update { it.copy(voiceOn = false) }
@@ -666,13 +670,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             val id = docIdFlow.value ?: return@launch
             c.repo.removeNote(id, n.text, n.pageId)
             _ui.update { u -> (u.notes - n).let { rest -> u.copy(notes = rest, showNotes = u.showNotes && rest.isNotEmpty()) } }
-            notify("Nota eliminata")
+            notify(str(R.string.note_deleted))
         }
     }
 
     fun onAudioForNote(granted: Boolean) {
         audioOk = audioOk || granted
-        if (granted) recordNote() else notify("Serve il permesso microfono per le note vocali")
+        if (granted) recordNote() else notify(str(R.string.need_mic))
     }
 
     // ---------- voice ----------
@@ -839,7 +843,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             })
         } else {
             Text(
-                "Serve il permesso fotocamera", color = Color.White,
+                str(R.string.need_camera), color = Color.White,
                 modifier = Modifier.align(Alignment.Center).clickable { launcher.launch(arrayOf(Manifest.permission.CAMERA)) }
             )
         }
@@ -856,7 +860,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { vm.close() }) {
-                Icon(Icons.Filled.Folder, "Elenco documenti", tint = Color.White)
+                Icon(Icons.Filled.Folder, str(R.string.doc_list), tint = Color.White)
             }
             if (ui.savedCount > 0) Box(Modifier.clip(RoundedCornerShape(50)).clickable { vm.close() }) {
                 Pill("✓ ${ui.savedCount}")
@@ -866,13 +870,13 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToggleIcon(
                     if (ui.fullPreview) Icons.Filled.OpenInFull else Icons.Filled.CloseFullscreen,
-                    if (ui.fullPreview) "Anteprima: schermo pieno" else "Anteprima: fotogramma intero",
+                    if (ui.fullPreview) str(R.string.preview_full) else str(R.string.preview_fit),
                     on = !ui.fullPreview,
                 ) { vm.togglePreview() }
-                ToggleIcon(Icons.Filled.HighQuality, "Qualità massima", ui.hq) { vm.toggleHq() }
+                ToggleIcon(Icons.Filled.HighQuality, str(R.string.hq), ui.hq) { vm.toggleHq() }
                 if (ui.canUpload) ToggleIcon(
                     if (ui.upload) Icons.Filled.CloudUpload else Icons.Filled.CloudOff,
-                    if (ui.upload) "Invio agli storage" else "Solo locale",
+                    if (ui.upload) str(R.string.upload) else str(R.string.local_only),
                     on = ui.upload,
                 ) { vm.toggleUpload() }
                 // Tristate: Auto -> Bordi -> Spento
@@ -883,18 +887,18 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                         else -> Icons.Filled.Image
                     },
                     when {
-                        ui.edges && ui.auto -> "Rilevamento: Auto"
-                        ui.edges -> "Rilevamento: Bordi"
-                        else -> "Rilevamento: Spento"
+                        ui.edges && ui.auto -> str(R.string.detect_state_auto)
+                        ui.edges -> str(R.string.detect_state_edges)
+                        else -> str(R.string.detect_state_off)
                     },
                     on = ui.edges,
                     activeColor = if (ui.auto) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                 ) { vm.cycleDetect() }
                 ToggleIcon(
-                    if (ui.geo) Icons.Filled.LocationOn else Icons.Filled.LocationOff, "Posizione GPS", ui.geo,
+                    if (ui.geo) Icons.Filled.LocationOn else Icons.Filled.LocationOff, str(R.string.gps), ui.geo,
                 ) { vm.toggleGeo() }
                 ToggleIcon(
-                    if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, "Luce", ui.torch,
+                    if (ui.torch) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff, str(R.string.light), ui.torch,
                     activeColor = Color(0xFFFFB300),
                 ) { vm.toggleTorch() }
             }
@@ -910,17 +914,17 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
             val autoOn = ui.auto && ui.edges
             val live = when {
                 ui.notice != null -> ui.notice
-                ui.saving -> "Salvo il documento…"
-                autoOn && ui.phase == Phase.STEADYING -> "Tieni fermo…"
-                autoOn && ui.phase == Phase.CAPTURING -> "Scatto…"
+                ui.saving -> str(R.string.saving_doc)
+                autoOn && ui.phase == Phase.STEADYING -> str(R.string.hold_still)
+                autoOn && ui.phase == Phase.CAPTURING -> str(R.string.capturing)
                 else -> null
             }
-            val nextHint = if (autoOn && ui.phase == Phase.WAIT_NEXT) "Pagina acquisita · metti la prossima" else null
+            val nextHint = if (autoOn && ui.phase == Phase.WAIT_NEXT) str(R.string.next_page) else null
             var showNext by remember { mutableStateOf(false) }
             LaunchedEffect(nextHint) { showNext = nextHint != null; if (nextHint != null) { delay(3000); showNext = false } }
             val line = listOfNotNull(
                 live ?: nextHint?.takeIf { showNext },
-                ui.processing.takeIf { it > 0 }?.let { "elaboro $it" },
+                ui.processing.takeIf { it > 0 }?.let { str(R.string.processing_n, it) },
             ).joinToString("  ·  ")
             if (line.isNotEmpty()) Pill(line)
             val heard = partial.ifBlank { ui.lastHeard }
@@ -939,15 +943,15 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                 Icon(Icons.Filled.Mic, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(48.dp))
                 Text(
                     when (kind) {
-                        Dictation.PRE -> "Nuovo documento: detta i metadati"
-                        Dictation.POST -> "Documento finito: detta i metadati"
-                        Dictation.NOTE -> "Detta la nota" + if (pages.isNotEmpty()) " (pagina ${pages.size})" else ""
+                        Dictation.PRE -> str(R.string.dict_pre)
+                        Dictation.POST -> str(R.string.dict_post)
+                        Dictation.NOTE -> str(R.string.dict_note) + if (pages.isNotEmpty()) str(R.string.page_suffix, pages.size) else ""
                     },
                     color = Color.White, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center,
                 )
-                Text(partial.ifBlank { if (kind == Dictation.NOTE) "Parla, mi fermo quando smetti" else "«titolo … categoria … tag …»" }, color = Color.White, textAlign = TextAlign.Center)
+                Text(partial.ifBlank { if (kind == Dictation.NOTE) str(R.string.dict_note_hint) else str(R.string.meta_keywords_hint) }, color = Color.White, textAlign = TextAlign.Center)
                 Spacer(Modifier.size(12.dp))
-                Button(onClick = { vm.skipDictation() }) { Text(if (kind == Dictation.NOTE) "Annulla" else "Salta") }
+                Button(onClick = { vm.skipDictation() }) { Text(if (kind == Dictation.NOTE) str(R.string.cancel) else str(R.string.skip)) }
             }
         }
 
@@ -985,7 +989,7 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                         ) {
                             Icon(Icons.Filled.Check, null)
                             Spacer(Modifier.width(4.dp))
-                            Text("Fine")
+                            Text(str(R.string.done))
                         }
                     }
                 }
@@ -1007,7 +1011,7 @@ private fun NoteButton(count: Int, active: Boolean, onList: () -> Unit, onClick:
                 .background(if (active) MaterialTheme.colorScheme.tertiary else Color(0x99000000))
                 .combinedClickable(onClick = onClick, onLongClick = { if (count > 0) onList() }),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.EditNote, "Nota vocale", tint = Color.White) }
+        ) { Icon(Icons.Filled.EditNote, str(R.string.voice_note), tint = Color.White) }
         if (count > 0) Badge(Modifier.align(Alignment.TopEnd).clickable(onClick = onList)) {
             Text("$count", modifier = Modifier.padding(horizontal = 2.dp))
         }
@@ -1029,7 +1033,7 @@ private fun NoteList(notes: List<VoiceNote>, pages: List<PageEntity>, onDelete: 
                     maxLines = 2, modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = { onDelete(n) }) {
-                    Icon(Icons.Filled.Close, "Elimina nota", tint = Color.White)
+                    Icon(Icons.Filled.Close, str(R.string.delete_note), tint = Color.White)
                 }
             }
         }
@@ -1047,7 +1051,7 @@ private fun PagesButton(pages: List<PageEntity>, processing: Int, onClick: () ->
                     .clip(RoundedCornerShape(6.dp)).background(Color(0x88FFFFFF))
             )
             AsyncImage(
-                model = File(last.processedPath), contentDescription = "Pagine del documento",
+                model = File(last.processedPath), contentDescription = str(R.string.doc_pages),
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.size(width = 50.dp, height = 66.dp).align(Alignment.TopStart)
                     .clip(RoundedCornerShape(6.dp)).border(2.dp, Color.White, RoundedCornerShape(6.dp))
@@ -1072,7 +1076,7 @@ private fun PageStrip(pages: List<PageEntity>, onDelete: (PageEntity) -> Unit) {
         itemsIndexed(pages, key = { _, p -> p.id }) { i, p ->
             Box(Modifier.size(width = 66.dp, height = 88.dp)) {
                 AsyncImage(
-                    model = File(p.processedPath), contentDescription = "Pagina ${i + 1}",
+                    model = File(p.processedPath), contentDescription = str(R.string.page_n, i + 1),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp))
                 )
@@ -1085,7 +1089,7 @@ private fun PageStrip(pages: List<PageEntity>, onDelete: (PageEntity) -> Unit) {
                     Modifier.align(Alignment.TopEnd).padding(2.dp).size(24.dp).clip(CircleShape)
                         .background(Color(0xCC000000)).clickable { onDelete(p) },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Filled.Close, "Elimina pagina", tint = Color.White, modifier = Modifier.size(16.dp)) }
+                ) { Icon(Icons.Filled.Close, str(R.string.delete_page), tint = Color.White, modifier = Modifier.size(16.dp)) }
             }
         }
     }

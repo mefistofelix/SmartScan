@@ -19,13 +19,24 @@ import okhttp3.OkHttpClient
 import org.opencv.android.OpenCVLoader
 import java.util.concurrent.TimeUnit
 
+// App-wide context for [str]; set first thing in [SmartScanApp.onCreate].
+private lateinit var appContext: Context
+
+/**
+ * Localized UI string (res/values = English, res/values-it = Italian). Usable in composables, ViewModels and
+ * enum labels alike, so all user-facing text lives in string resources.
+ */
+fun str(id: Int, vararg args: Any): String =
+    if (args.isEmpty()) appContext.getString(id) else appContext.getString(id, *args)
+
 class SmartScanApp : Application() {
     lateinit var container: AppContainer
         private set
 
     override fun onCreate() {
         super.onCreate()
-        if (!OpenCVLoader.initLocal()) Log.e("SmartScan", "OpenCV non inizializzato")
+        appContext = this
+        if (!OpenCVLoader.initLocal()) Log.e("SmartScan", "OpenCV not initialized")
         // Neural document corner model: loaded in the background, OpenCV detection is used until it is ready.
         Thread { com.smartscan.scan.NeuralCorners.init(this) }.start()
         container = AppContainer(this)

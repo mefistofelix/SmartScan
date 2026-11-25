@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.app.Application
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
@@ -120,9 +124,9 @@ fun CropScreen(pageId: Long, onClose: () -> Unit) {
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text("Bordi pagina") },
-            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Indietro") } },
-            actions = { Button(onClick = { vm.apply(onClose) }, enabled = !saving, modifier = Modifier.padding(end = 8.dp)) { Text("Applica") } },
+            title = { Text(str(R.string.crop_title)) },
+            navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, str(R.string.back)) } },
+            actions = { Button(onClick = { vm.apply(onClose) }, enabled = !saving, modifier = Modifier.padding(end = 8.dp)) { Text(str(R.string.apply)) } },
         )
     }) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
@@ -132,13 +136,13 @@ fun CropScreen(pageId: Long, onClose: () -> Unit) {
                 else CropEditor(b, corners, margin, { vm.corners.value = it }, Modifier.fillMaxSize().padding(16.dp))
             }
             Text(
-                "Espandi / restringi bordi: ${(margin * 100).roundToInt()}%",
+                str(R.string.crop_margin, (margin * 100).roundToInt()),
                 style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 16.dp, top = 8.dp)
             )
             Slider(value = margin, onValueChange = { vm.margin.value = it }, valueRange = -0.05f..0.15f, modifier = Modifier.padding(horizontal = 16.dp))
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { vm.autoDetect() }, modifier = Modifier.weight(1f)) { Text("Rileva bordi") }
-                OutlinedButton(onClick = { vm.full() }, modifier = Modifier.weight(1f)) { Text("Pagina intera") }
+                OutlinedButton(onClick = { vm.autoDetect() }, modifier = Modifier.weight(1f)) { Text(str(R.string.detect_edges)) }
+                OutlinedButton(onClick = { vm.full() }, modifier = Modifier.weight(1f)) { Text(str(R.string.full_page)) }
             }
         }
     }

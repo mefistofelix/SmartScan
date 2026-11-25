@@ -1,5 +1,9 @@
 package com.smartscan.ui
 
+import com.smartscan.str
+
+import com.smartscan.R
+
 import android.app.Application
 import android.Manifest
 import android.content.Intent
@@ -174,7 +178,7 @@ class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             ids.forEach { c.repo.deleteDoc(it) }
             selected.value = emptySet()
-            messages.emit(if (ids.size == 1) "Documento eliminato" else "${ids.size} documenti eliminati")
+            messages.emit(if (ids.size == 1) str(R.string.archive_deleted_one) else str(R.string.archive_deleted_n, ids.size))
         }
     }
 
@@ -188,7 +192,7 @@ class ArchiveViewModel(app: Application) : AndroidViewModel(app) {
                 shares.emit(c.exporter.shareIntent(listOf(zip), "application/zip"))
                 selected.value = emptySet()
             } catch (e: Exception) {
-                messages.emit("Errore ZIP: ${e.message}")
+                messages.emit(str(R.string.err_zip, e.message.orEmpty()))
             } finally {
                 zipping.value = false
             }
@@ -233,18 +237,18 @@ fun ArchiveScreen(
     Scaffold(
         topBar = {
             if (selecting) TopAppBar(
-                title = { Text("${selected.size} selezionati") },
-                navigationIcon = { IconButton(onClick = { vm.clearSelection() }) { Icon(Icons.Filled.Close, "Annulla selezione") } },
+                title = { Text(str(R.string.selected_n, selected.size)) },
+                navigationIcon = { IconButton(onClick = { vm.clearSelection() }) { Icon(Icons.Filled.Close, str(R.string.cancel_selection)) } },
                 actions = {
-                    IconButton(onClick = { vm.selectAll() }) { Icon(Icons.Filled.SelectAll, "Seleziona tutti") }
-                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Elimina") }
+                    IconButton(onClick = { vm.selectAll() }) { Icon(Icons.Filled.SelectAll, str(R.string.select_all)) }
+                    IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, str(R.string.delete)) }
                 },
             ) else TopAppBar(
                 title = { Text("SmartScan") },
                 actions = {
-                    IconButton(onClick = onTaxonomy) { Icon(Icons.Filled.AccountTree, "Categorie e tag") }
+                    IconButton(onClick = onTaxonomy) { Icon(Icons.Filled.AccountTree, str(R.string.categories_tags)) }
                     IconButton(onClick = onEndpoints) { Icon(Icons.Filled.QrCodeScanner, "Endpoint") }
-                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Impostazioni") }
+                    IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, str(R.string.settings)) }
                 },
             )
         },
@@ -255,11 +259,11 @@ fun ArchiveScreen(
                     if (zipping) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     else Icon(Icons.Filled.FolderZip, null)
                 },
-                text = { Text(if (zipping) "Creo lo ZIP…" else "Condividi ZIP (${selected.size})") },
+                text = { Text(if (zipping) str(R.string.zip_creating) else str(R.string.zip_share, selected.size)) },
             ) else ExtendedFloatingActionButton(
                 onClick = onScan,
                 icon = { Icon(Icons.Filled.DocumentScanner, null) },
-                text = { Text("Scansiona") },
+                text = { Text(str(R.string.scan)) },
             )
         },
         floatingActionButtonPosition = FabPosition.Center,
@@ -268,18 +272,18 @@ fun ArchiveScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = if (listening) partial else query, onValueChange = { vm.query.value = it },
-                    placeholder = { Text(if (listening) "Parla…" else "Cerca titolo, testo, tag…") },
+                    placeholder = { Text(if (listening) "Parla…" else str(R.string.search_hint)) },
                     leadingIcon = { Icon(Icons.Filled.Search, null) },
                     trailingIcon = {
                         Row {
                             if (query.isNotEmpty() && !listening) IconButton(onClick = { vm.query.value = "" }) {
-                                Icon(Icons.Filled.Close, "Azzera ricerca")
+                                Icon(Icons.Filled.Close, str(R.string.search_clear))
                             }
                             if (vm.voiceAvailable) IconButton(onClick = {
                                 if (micGranted()) vm.voiceSearch() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }) {
                                 Icon(
-                                    Icons.Filled.Mic, if (listening) "Interrompi" else "Cerca a voce",
+                                    Icons.Filled.Mic, if (listening) str(R.string.stop) else str(R.string.search_voice),
                                     tint = if (listening) MaterialTheme.colorScheme.error else LocalContentColor.current,
                                 )
                             }
@@ -292,14 +296,14 @@ fun ArchiveScreen(
                 val name = filter?.let { id -> nodes.firstOrNull { it.id == id }?.name }
                 FilterChip(
                     selected = name != null, onClick = { picker = true },
-                    label = { Text(name ?: "Filtra per categoria/tag") },
+                    label = { Text(name ?: str(R.string.filter_by_node)) },
                     leadingIcon = { Icon(Icons.Filled.FilterList, null) },
                 )
             }
             if (items.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        if (query.isBlank() && filter == null) "Nessun documento.\nPremi «Scansiona» per iniziare." else "Nessun risultato",
+                        if (query.isBlank() && filter == null) str(R.string.empty_archive) else str(R.string.no_results),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
@@ -364,14 +368,14 @@ fun ArchiveScreen(
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
-        title = { Text(if (selected.size == 1) "Eliminare il documento?" else "Eliminare ${selected.size} documenti?") },
-        text = { Text("Vengono rimossi dall'archivio locale. Le copie già inviate agli endpoint restano.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deleteSelected() }) { Text("Elimina") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annulla") } },
+        title = { Text(if (selected.size == 1) str(R.string.delete_doc_title) else str(R.string.delete_n_title, selected.size)) },
+        text = { Text(str(R.string.delete_many_text)) },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deleteSelected() }) { Text(str(R.string.delete)) } },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(str(R.string.cancel)) } },
     )
 
     if (picker) TreePickerDialog(
-        nodes = nodes, endpoints = endpoints, initial = setOfNotNull(filter), single = true, title = "Filtra archivio",
+        nodes = nodes, endpoints = endpoints, initial = setOfNotNull(filter), single = true, title = str(R.string.filter_archive),
         onDismiss = { picker = false },
         onConfirm = { vm.filterNode.value = it.firstOrNull(); picker = false },
     )
@@ -395,32 +399,32 @@ private fun DocCard(
     ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (handle != null) Icon(
-                Icons.Filled.DragHandle, "Trascina per riordinare",
+                Icons.Filled.DragHandle, str(R.string.drag_reorder),
                 modifier = handle.padding(end = 8.dp).size(28.dp),
             )
             Box {
                 item.row.thumb?.let { Thumb(it, Modifier.size(56.dp, 74.dp)) }
                 if (selected) Icon(
-                    Icons.Filled.CheckCircle, "Selezionato", tint = MaterialTheme.colorScheme.primary,
+                    Icons.Filled.CheckCircle, str(R.string.selected), tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.align(Alignment.TopStart).padding(2.dp),
                 )
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(d.title.ifBlank { "Bozza" }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${formatDate(d.createdAt)} · ${item.row.pageCount} pag.", style = MaterialTheme.typography.bodySmall)
+                Text(d.title.ifBlank { str(R.string.draft) }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(str(R.string.date_pages_short, formatDate(d.createdAt), item.row.pageCount), style = MaterialTheme.typography.bodySmall)
                 if (item.nodes.isNotEmpty()) Text(
                     item.nodes.joinToString("  ") { "#" + it.name }, style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             when {
-                d.status == DocStatus.DRAFT -> Text("Bozza", style = MaterialTheme.typography.labelSmall)
+                d.status == DocStatus.DRAFT -> Text(str(R.string.draft), style = MaterialTheme.typography.labelSmall)
                 d.status == DocStatus.PROCESSING || item.uploads.any { it.status == UploadStatus.RUNNING } ->
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                item.uploads.any { it.status == UploadStatus.FAILED } -> Icon(Icons.Filled.Error, "Invio fallito", tint = MaterialTheme.colorScheme.error)
-                item.uploads.any { it.status == UploadStatus.QUEUED } -> Icon(Icons.Filled.CloudUpload, "In coda")
-                item.uploads.isNotEmpty() -> Icon(Icons.Filled.CloudDone, "Inviato", tint = MaterialTheme.colorScheme.primary)
+                item.uploads.any { it.status == UploadStatus.FAILED } -> Icon(Icons.Filled.Error, str(R.string.upload_failed), tint = MaterialTheme.colorScheme.error)
+                item.uploads.any { it.status == UploadStatus.QUEUED } -> Icon(Icons.Filled.CloudUpload, str(R.string.status_queued))
+                item.uploads.isNotEmpty() -> Icon(Icons.Filled.CloudDone, str(R.string.status_sent), tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
