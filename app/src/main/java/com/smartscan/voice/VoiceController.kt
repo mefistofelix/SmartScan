@@ -74,6 +74,10 @@ class VoiceController(private val context: Context, private val language: String
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            // No censorship: ask the recognizer not to mask swear words with asterisks
+            // (RecognizerIntent.EXTRA_MASK_OFFENSIVE_WORDS, API 33+; older recognizers ignore unknown extras).
+            putExtra("android.speech.extra.MASK_OFFENSIVE_WORDS", false)
+            putExtra("android.speech.extra.PROFANITY_FILTER", false)
             if (longSilence) {
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
