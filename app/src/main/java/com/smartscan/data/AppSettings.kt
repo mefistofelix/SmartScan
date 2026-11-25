@@ -45,6 +45,9 @@ class AppSettings(context: Context) {
     /** Scanner preview: full screen (true) or the whole 4:3 frame, centered (false). */
     var fullPreview: Boolean
         get() = bool("fullPreview", true); set(v) = setBool("fullPreview", v)
+    /** Scanner: documents finished with «Fine» go to the auto-upload endpoints (false = keep local). */
+    var uploadOnFinish: Boolean
+        get() = bool("uploadOnFinish", true); set(v) = setBool("uploadOnFinish", v)
     /** Open the camera right away when the app starts (the archive stays below it). */
     var startInScanner: Boolean
         get() = bool("startInScanner", true); set(v) = setBool("startInScanner", v)

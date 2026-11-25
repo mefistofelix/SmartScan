@@ -57,6 +57,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.HighQuality
@@ -161,6 +163,9 @@ data class ScannerUi(
     val geo: Boolean = false,
     /** Preview fills the screen (crops the sides) or shows the whole captured frame. */
     val fullPreview: Boolean = true,
+    /** Send to storage at «Fine»; the toggle shows only when an auto-upload endpoint exists. */
+    val upload: Boolean = true,
+    val canUpload: Boolean = false,
     /** Voice notes added to the current (not yet saved) document; each one can be deleted. */
     val notes: List<VoiceNote> = emptyList(),
     val showNotes: Boolean = false,
@@ -204,6 +209,7 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             edges = settings.edgeDetect, deskew = settings.edgeDetect && settings.autoDeskew,
             geo = settings.geoTag,
             fullPreview = settings.fullPreview,
+            upload = settings.uploadOnFinish,
         )
     )
     val ui: StateFlow<ScannerUi> = _ui.asStateFlow()
@@ -234,6 +240,9 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             docIdFlow.value = if (existingDocId > 0) existingDocId else c.repo.createDraft()
         }
         _ui.update { it.copy(voiceAvailable = voice.available) }
+        viewModelScope.launch {
+            c.repo.observeEndpoints().collect { eps -> _ui.update { it.copy(canUpload = eps.any { e -> e.autoUpload }) } }
+        }
     }
 
     // ---------- camera ----------
@@ -430,7 +439,10 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
                 controller.reset()
                 tracker.reset()
                 _ui.update { it.copy(metaSummary = null, showPages = false, notes = emptyList(), showNotes = false, savedCount = it.savedCount + 1) }
-                notify("Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}")
+                notify(
+                    "Documento salvato · $n ${if (n == 1) "pagina" else "pagine"} · ${_ui.value.output.label}" +
+                        if (_ui.value.canUpload && !_ui.value.upload) " · solo locale" else ""
+                )
                 // Straight back to the camera: no dictation prompt in between (pre-dictation only when the scanner opens).
                 if (!closing) resumeCommands()
             } finally {
@@ -461,7 +473,8 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
 
     private suspend fun save(id: Long): Int {
         val n = c.repo.pageCount(id)
-        c.repo.markProcessing(id, null, null, _ui.value.output)
+        val u = _ui.value
+        c.repo.markProcessing(id, null, null, u.output, upload = if (u.canUpload) u.upload else null)
         c.sync.enqueueFinalize(id)
         return n
     }
@@ -511,6 +524,13 @@ class ScannerViewModel(app: Application, private val existingDocId: Long) : Andr
             val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
             if (level in 0..15) notify("Batteria al $level%: il telefono può bloccare la luce")
         }
+    }
+
+    fun toggleUpload() {
+        val v = !_ui.value.upload
+        settings.uploadOnFinish = v
+        _ui.update { it.copy(upload = v) }
+        notify(if (v) "Invio agli storage a «Fine»" else "Solo locale: a «Fine» non viene inviato")
     }
 
     fun togglePreview() {
@@ -826,6 +846,11 @@ fun ScannerScreen(docId: Long, onClose: () -> Unit) {
                     on = !ui.fullPreview,
                 ) { vm.togglePreview() }
                 ToggleIcon(Icons.Filled.HighQuality, "Qualità massima", ui.hq) { vm.toggleHq() }
+                if (ui.canUpload) ToggleIcon(
+                    if (ui.upload) Icons.Filled.CloudUpload else Icons.Filled.CloudOff,
+                    if (ui.upload) "Invio agli storage" else "Solo locale",
+                    on = ui.upload,
+                ) { vm.toggleUpload() }
                 // Tristate: Auto -> Bordi -> Spento
                 ToggleIcon(
                     when {

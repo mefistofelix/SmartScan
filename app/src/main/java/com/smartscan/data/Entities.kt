@@ -36,6 +36,8 @@ data class DocumentEntity(
     val output: DocOutput = DocOutput.PDF,
     /** Archive order, newest first (ORDER BY sortKey DESC). Starts as createdAt; reordering permutes keys. */
     val sortKey: Long = System.currentTimeMillis(),
+    /** false = keep local: «Fine» does not send it to the auto-upload endpoints (manual upload still works). */
+    val upload: Boolean = true,
 )
 
 @Entity(

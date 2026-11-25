@@ -67,10 +67,11 @@ class SyncManager(
     private val wm get() = WorkManager.getInstance(context)
     private val json = EndpointConfig.json
 
-    /** OCR first, then upload to every endpoint flagged for automatic upload. */
+    /** OCR first, then upload to every endpoint flagged for automatic upload (unless the document is local-only). */
     suspend fun enqueueFinalize(docId: Long) {
         val ocr = OneTimeWorkRequestBuilder<OcrWorker>().setInputData(workDataOf(KEY_DOC to docId)).build()
-        val uploads = repo.endpoints().filter { it.autoUpload }.map { ep ->
+        val send = repo.getDoc(docId)?.upload != false
+        val uploads = if (!send) emptyList() else repo.endpoints().filter { it.autoUpload }.map { ep ->
             repo.setUpload(docId, ep.id, UploadStatus.QUEUED, "In coda")
             uploadRequest(docId, ep.id)
         }
